@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Connexion — LivreOCR{% endblock %}
+{% load static %}
+{% block title %}Connexion — Ocypete OCR{% endblock %}
 {% block content %}
 <div class="card login-card">
+  <img class="login-logo" src="{% static 'books/img/ocypete-logo.png' %}" alt="Ocypete OCR" width="240" height="240">
   <h1>Connexion</h1><p>Connectez-vous pour accéder à vos livres et vos traitements.</p>
   <form method="post" novalidate>{% csrf_token %}
     {% if form.errors %}<p class="login-error" role="alert">Identifiant ou mot de passe incorrect. Vérifiez vos informations et réessayez.</p>{% endif %}

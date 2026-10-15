@@ -3,13 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}LivreOCR{% endblock %}</title>
+  <title>{% block title %}Ocypete OCR{% endblock %}</title>
   {% load static %}
+  <link rel="icon" type="image/png" sizes="128x128" href="{% static 'books/img/favicon.png' %}">
+  <link rel="icon" href="{% static 'books/img/favicon.ico' %}" sizes="any">
+  <meta name="theme-color" content="#0a63e0">
   <link rel="stylesheet" href="{% static 'books/css/app.css' %}?v={{ asset_version }}">
 </head>
 <body class="{% block body_class %}{% endblock %}">
 <header class="site-header"><div class="nav">
-  <a class="logo" href="{% url 'dashboard' %}" aria-label="LivreOCR, tableau de bord">📚 LivreOCR</a>
+  <a class="logo" href="{% url 'dashboard' %}" aria-label="Ocypete OCR, tableau de bord">
+    <img src="{% static 'books/img/ocypete-emblem.png' %}" alt="" width="34" height="34">
+    <span>Ocypete <small>OCR</small></span>
+  </a>
   <nav class="row nav-actions" aria-label="Navigation utilisateur">
     {% if user.is_authenticated %}
       <span class="muted user-name">{{ user.username }}</span>

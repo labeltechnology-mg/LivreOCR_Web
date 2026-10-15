@@ -1,4 +1,8 @@
-# LivreOCR Web — application multi-utilisateurs (prototype)
+# Ocypete OCR — application multi-utilisateurs (prototype)
+
+<p align="center"><img src="books/static/books/img/ocypete-logo.png" alt="Logo Ocypete OCR" width="220"></p>
+
+> Ocypete OCR est le nom de l'application. Le dépôt, les variables d'environnement (`LIVREOCR_MEDIA_ROOT`) et les noms de code gardent le préfixe historique « livreocr ».
 
 Application Django en français pour gérer des livres numérisés, importer des photos/scans, prétraiter les pages et créer un PDF avec une couche texte OCR.
 

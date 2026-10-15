@@ -77,6 +77,40 @@ class ImageProcessingTests(TestCase):
             self.assertEqual(process_image(source, book, max_side=800).size[1], 800)  # long side of the A4 sheet
 
 
+class ClassifyTests(TestCase):
+    def test_page_types(self):
+        from .classify import CHART, PHOTO, TEXT, classify_page
+
+        self.assertEqual(classify_page(text_page())[0], TEXT)
+
+        # A picture: smooth, textured, wide range of tones.
+        rng = np.random.default_rng(1)
+        y, x = np.mgrid[0:500, 0:700]
+        picture = (110 + 90 * np.sin(x / 55.0) * np.cos(y / 40.0) + rng.normal(0, 14, x.shape)).clip(0, 255).astype("uint8")
+        with_picture = text_page()
+        with_picture.paste(Image.fromarray(picture).convert("RGB"), (250, 300))
+        self.assertEqual(classify_page(with_picture)[0], PHOTO)
+
+        # Big black bars (bar chart).
+        bars = text_page(); draw = ImageDraw.Draw(bars)
+        for i in range(5):
+            draw.rectangle((200 + i * 160, 500 + i * 40, 320 + i * 160, 1000), fill="black")
+        self.assertEqual(classify_page(bars)[0], CHART)
+
+        # A line drawing: an axis frame and a curve, few letters.
+        curve = Image.new("RGB", (1200, 1600), "white"); draw = ImageDraw.Draw(curve)
+        draw.rectangle((150, 300, 1050, 1100), outline="black", width=4)
+        draw.line([(150 + i * 15, 900 - int(250 * abs(np.sin(i / 7.0)))) for i in range(61)], fill="black", width=4)
+        self.assertEqual(classify_page(curve)[0], CHART)
+
+        # Text on a flat coloured box is still a text page.
+        boxed = text_page(); draw = ImageDraw.Draw(boxed)
+        draw.rectangle((100, 900, 1100, 1300), fill=(130, 80, 40))
+        for row in range(8):
+            draw.text((140, 930 + row * 40), TEXT, fill="white")
+        self.assertEqual(classify_page(boxed)[0], TEXT)
+
+
 class ViewTests(TestCase):
     def setUp(self):
         self.media = tempfile.mkdtemp()
@@ -123,6 +157,17 @@ class ViewTests(TestCase):
         response.close()
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_analysis_sets_page_types_and_counts_them(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(f"/livres/{self.book.pk}/analyser/", follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.page.refresh_from_db()
+        self.assertEqual(self.page.page_type, "text")
+        self.assertFalse(self.page.has_photo)
+        self.assertContains(response, "1 page(s) de texte")
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(f"/livres/{self.book.pk}/analyser/").status_code, 404)
 
     def test_rotation_and_photo_marking_are_saved_per_page(self):
         self.client.force_login(self.owner)

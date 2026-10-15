@@ -41,6 +41,19 @@
           {% include "books/_field.html" with field=settings_form.denoise_mode %}
           {% include "books/_field.html" with field=settings_form.unsharp %}
         </details>
+        {% if pages %}
+        <details class="tool-group" open>
+          <summary>🔍 Analyse des pages</summary>
+          <ul class="type-counts" aria-label="Pages par type">
+            <li>📄 <strong>{{ type_counts.text }}</strong> texte</li>
+            <li>📈 <strong>{{ type_counts.chart }}</strong> graphique / courbe</li>
+            <li>🖼 <strong>{{ type_counts.photo }}</strong> image</li>
+            {% if type_counts.unknown %}<li class="muted">❔ <strong>{{ type_counts.unknown }}</strong> non analysée{{ type_counts.unknown|pluralize }}</li>{% endif %}
+          </ul>
+          <p class="muted">L’analyse repère le type de chaque page et marque 📷 les pages image, qui prennent alors le rendu du groupe « Pages avec photo ». Vous pouvez corriger page par page dans l’aperçu.</p>
+          <button class="btn secondary" type="submit" form="analyze-form">🔍 {% if type_counts.unknown == pages|length %}Analyser les pages{% else %}Relancer l’analyse{% endif %}</button>
+        </details>
+        {% endif %}
         <details class="tool-group photo-group" {% if photo_count %}open{% endif %}>
           <summary>📷 Pages avec photo{% if photo_count %} ({{ photo_count }}){% endif %}</summary>
           <p class="muted">Rendu à part pour les pages marquées « 📷 Page avec photo » dans l’aperçu. Les autres pages gardent le rendu ci-dessus.</p>
@@ -69,7 +82,7 @@
         <summary>🗂 Pages importées ({{ pages|length }})</summary>
         <div class="page-list">
         {% for page in pages %}
-          <div class="page-row"><span><strong>{{ page.order }}.</strong> {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</span><span class="muted">{{ page.image.size|filesizeformat }}</span></div>
+          <div class="page-row"><span>{% if page.type_icon %}{{ page.type_icon }} {% endif %}<strong>{{ page.order }}.</strong> {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</span><span class="muted">{{ page.image.size|filesizeformat }}</span></div>
         {% endfor %}
         </div>
         <p class="muted">L’ordre suit l’ordre d’import.</p>
@@ -88,6 +101,7 @@
     <div class="toolbox-foot">
       <button class="btn secondary" type="submit" form="settings-form">💾 Enregistrer les réglages</button>
       {% if pages %}
+      <form id="analyze-form" method="post" action="{% url 'analyze_pages' book.pk %}" hidden>{% csrf_token %}</form>
       <form id="process-form" method="post" action="{% url 'process_book' book.pk %}">
         {% csrf_token %}
         {% for field in settings_form %}{{ field.as_hidden }}{% endfor %}
@@ -122,7 +136,7 @@
       <div class="preview-bar">
         <button class="btn secondary" id="preview-previous" type="button" aria-label="Afficher la page précédente">←</button>
         <select id="preview-page" aria-label="Sélectionner la page à prévisualiser">
-          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}">{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</option>{% endfor %}
+          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}">{% if page.type_icon %}{{ page.type_icon }} {% endif %}{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</option>{% endfor %}
         </select>
         <button class="btn secondary" id="preview-next" type="button" aria-label="Afficher la page suivante">→</button>
         <label class="photo-toggle" title="Cette page contient une photo : elle utilise les réglages du groupe « Pages avec photo »">

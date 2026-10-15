@@ -7,7 +7,9 @@ from django.core.files.storage import default_storage
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
-from .image_processing import process_image, same_side_neighbours
+from PIL import Image, ImageOps
+from .classify import CHART, PHOTO, TEXT, classify_page
+from .image_processing import crop_to_page, process_image, same_side_neighbours, sibling_quad
 from django.utils.text import get_valid_filename
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -71,6 +73,12 @@ def book_detail(request, pk):
         "book": book, "settings_form": settings_form, "pages": pages,
         "preview_pages_json": json.dumps(preview_pages).replace("<", "\\u003c"),
         "photo_count": sum(1 for p in pages if p.has_photo),
+        "type_counts": {
+            "text": sum(1 for p in pages if p.page_type == TEXT),
+            "chart": sum(1 for p in pages if p.page_type == CHART),
+            "photo": sum(1 for p in pages if p.page_type == PHOTO),
+            "unknown": sum(1 for p in pages if not p.page_type),
+        },
     })
 
 @login_required
@@ -153,6 +161,40 @@ def rotate_page(request, pk, page_pk):
     page.rotation = (page.rotation + step) % 360
     page.save(update_fields=["rotation"])
     return JsonResponse({"rotation": page.rotation})
+
+@login_required
+@require_POST
+def analyze_pages(request, pk):
+    """Detect the type of every page (text, graph/curve, image) and count them."""
+    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    pages = list(book.pages.all())
+    if not pages:
+        messages.error(request, "Importez des pages avant de lancer l’analyse.")
+        return redirect("book_detail", pk=pk)
+    counts = {TEXT: 0, CHART: 0, PHOTO: 0}
+    failed = 0
+    for page in pages:
+        try:
+            with Image.open(page.image.path) as original:
+                original.draft("RGB", (2000, 2000))   # fast partial decode: enough to tell page types apart
+                photo = ImageOps.exif_transpose(original).convert("RGB")
+            if book.auto_crop_page:
+                neighbours = same_side_neighbours(pages, page)
+                photo = crop_to_page(photo, lambda: sibling_quad(neighbours))
+            kind, _ = classify_page(photo)
+        except Exception:
+            failed += 1
+            continue
+        counts[kind] += 1
+        page.page_type = kind
+        page.has_photo = kind == PHOTO     # image pages use the photo settings; change it per page if needed
+        page.save(update_fields=["page_type", "has_photo"])
+    messages.success(request, (
+        f"Analyse terminée : {counts[TEXT]} page(s) de texte, {counts[CHART]} page(s) avec graphique ou courbe, "
+        f"{counts[PHOTO]} page(s) avec image."))
+    if failed:
+        messages.warning(request, f"{failed} page(s) n’ont pas pu être analysées.")
+    return redirect("book_detail", pk=pk)
 
 @login_required
 @require_POST

@@ -67,11 +67,18 @@ class PageImage(models.Model):
     order = models.PositiveIntegerField(default=0)
     rotation = models.PositiveSmallIntegerField(default=0)  # manual clockwise turn: 0, 90, 180 or 270
     has_photo = models.BooleanField(default=False)  # page with a photo: uses the book's photo_* settings
+    # Detected by the page analysis: "text", "chart" (graph or curve), "photo" (image) or "" (not analysed yet).
+    page_type = models.CharField(max_length=10, blank=True, default="")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["order", "id"]
         unique_together = [("book", "order")]
+
+    @property
+    def type_icon(self) -> str:
+        from .classify import ICONS
+        return ICONS.get(self.page_type, "")
 
     def __str__(self):
         return f"{self.book.title} — page {self.order}"

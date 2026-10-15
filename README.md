@@ -55,6 +55,28 @@ gunicorn config.wsgi:application
 ```
 Servez les médias via un stockage privé ou une couche de téléchargement authentifiée. Pour une vraie production, configurez HTTPS, sauvegardes, limites de débit, quotas, antivirus de fichiers, journaux et politique de conservation.
 
+## Docker
+L'image contient Tesseract (fra, eng, deu, lat, spa, por, osd et l'allemand gothique `deu_latf`), Ghostscript et ocrmypdf : rien d'autre à installer.
+
+```bash
+cp .env.example .env        # renseigner DJANGO_SECRET_KEY et POSTGRES_PASSWORD
+docker compose up --build
+docker compose exec web python manage.py createsuperuser
+```
+Ouvrez http://localhost:8000/. Les scans et les PDF sont dans le volume `media-data`, la base dans `db-data` : `docker compose down` les conserve, `docker compose down -v` les supprime.
+
+- `DJANGO_HTTPS=0` (valeur du `.env.example`) sert uniquement à tester en http sur localhost. Derrière un reverse proxy HTTPS, mettez `DJANGO_HTTPS=1` et renseignez `DJANGO_ALLOWED_HOSTS` et `DJANGO_CSRF_TRUSTED_ORIGINS` avec votre domaine.
+- L'OCR s'exécute dans la requête : `GUNICORN_TIMEOUT` (900 s par défaut) doit dépasser la durée du plus gros livre.
+- Les images de pages et les PDF ne sont servis qu'à leur propriétaire (route `/media/…` authentifiée).
+
+## Workflow Git
+- `main` est toujours déployable. Travaillez sur une branche (`feature/…`, `fix/…`) puis ouvrez une Pull Request vers `main` (ou `develop` si vous l'utilisez).
+- À chaque push et chaque PR, GitHub Actions (`.github/workflows/ci.yml`) lance : `manage.py check`, vérification des migrations, `check --deploy`, les tests, puis la construction de l'image Docker et la présence des langues OCR.
+- Une PR ne se fusionne que si la CI est verte. Activez la protection de branche `main` dans *Settings → Branches* (« Require status checks » : *Checks and tests*, *Docker image builds*).
+- Pour publier une version : `git tag v1.0.0 && git push --tags`. Le workflow `docker-publish.yml` pousse l'image sur `ghcr.io/<compte>/<dépôt>` (tags `1.0.0`, `1.0` et `latest`).
+- Dependabot propose chaque semaine les mises à jour pip, Docker et GitHub Actions.
+- Tests en local : `python manage.py test`.
+
 ## Limites connues du prototype
 1. Le traitement OCR est synchrone dans la requête HTTP : pour les livres volumineux, ajoutez une file de tâches (Celery/RQ) et un worker.
 2. Les pages sont classées par ordre d’import, pas par détection automatique du contenu ; utilisez des noms séquentiels et contrôlez l’ordre.

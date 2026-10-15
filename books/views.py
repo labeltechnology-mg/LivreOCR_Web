@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 from django.contrib import messages
+from django.core.files.storage import default_storage
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
@@ -17,6 +18,18 @@ from .ocr import build_searchable_pdf, OCRProcessingError
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 MAX_FILES_PER_UPLOAD = 500
 MAX_FILE_SIZE = 30 * 1024 * 1024
+
+@login_required
+def media_file(request, path):
+    """Serve an uploaded page or a generated PDF, only to the book's owner."""
+    owned = (PageImage.objects.filter(image=path, book__owner=request.user).exists()
+             or Book.objects.filter(output_pdf=path, owner=request.user).exists())
+    if not owned:
+        raise Http404("Fichier introuvable.")
+    try:
+        return FileResponse(default_storage.open(path, "rb"))
+    except (FileNotFoundError, ValueError):
+        raise Http404("Fichier introuvable.")
 
 @login_required
 def dashboard(request):

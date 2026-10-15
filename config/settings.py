@@ -19,6 +19,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # serves collected static files under gunicorn
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -88,12 +89,18 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 MEDIA_URL = "/media/"
 STATIC_URL = "/static/"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 
 if not DEBUG:
     if SECRET_KEY.startswith("dev-only"):
         raise RuntimeError("Définissez DJANGO_SECRET_KEY en production.")
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SSL_REDIRECT", "1") == "1"
+    # Set DJANGO_HTTPS=0 only to try a production build over plain http (e.g. docker compose on localhost).
+    HTTPS = os.environ.get("DJANGO_HTTPS", "1") == "1"
+    SESSION_COOKIE_SECURE = HTTPS
+    CSRF_COOKIE_SECURE = HTTPS
+    SECURE_SSL_REDIRECT = HTTPS
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

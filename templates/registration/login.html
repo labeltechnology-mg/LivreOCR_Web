@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Connexion — LivreOCR{% endblock %}
+{% block content %}
+<div class="card login-card">
+  <h1>Connexion</h1><p>Connectez-vous pour accéder à vos livres et vos traitements.</p>
+  <form method="post" novalidate>{% csrf_token %}
+    {% if form.errors %}<p class="login-error" role="alert">Identifiant ou mot de passe incorrect. Vérifiez vos informations et réessayez.</p>{% endif %}
+    <div class="field"><label for="id_username">Nom d’utilisateur</label>{{ form.username }}</div>
+    <div class="field"><label for="id_password">Mot de passe</label>{{ form.password }}</div>
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <button class="btn" type="submit">Se connecter</button>
+  </form>
+  <p class="muted">Les comptes sont créés par l’administrateur dans cette première version.</p>
+</div>
+{% endblock %}

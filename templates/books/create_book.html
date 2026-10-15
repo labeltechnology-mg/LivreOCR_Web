@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Nouveau livre — LivreOCR{% endblock %}
+{% block content %}
+<div class="card create-card">
+  <h1>Nouveau livre</h1><p>Un projet est privé à votre compte. Les autres utilisateurs ne voient pas vos fichiers.</p>
+  <form method="post" novalidate>{% csrf_token %}
+    {% if form.non_field_errors %}<div class="login-error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+    {% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span aria-hidden="true">*</span><span class="visually-hidden">(obligatoire)</span>{% endif %}</label>{{ field }}{% for error in field.errors %}<div class="field-error" id="{{ field.id_for_label }}_error">{{ error }}</div>{% endfor %}</div>{% endfor %}
+    <p class="muted">Les champs marqués d’un astérisque sont obligatoires.</p>
+    <div class="row form-actions"><button class="btn" type="submit">Créer le livre</button><a class="btn secondary" href="{% url 'dashboard' %}">Annuler</a></div>
+  </form>
+</div>
+{% endblock %}

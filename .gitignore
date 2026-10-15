@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Django: local database, uploaded book scans and generated PDFs (private documents)
+db.sqlite3
+media/
+staticfiles/
+
+# Secrets and local settings
+.env
+*.env
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

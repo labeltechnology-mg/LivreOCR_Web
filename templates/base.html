@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}LivreOCR{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'books/css/app.css' %}?v={{ asset_version }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<header class="site-header"><div class="nav">
+  <a class="logo" href="{% url 'dashboard' %}" aria-label="LivreOCR, tableau de bord">📚 LivreOCR</a>
+  <nav class="row nav-actions" aria-label="Navigation utilisateur">
+    {% if user.is_authenticated %}
+      <span class="muted user-name">{{ user.username }}</span>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn secondary" type="submit">Déconnexion</button></form>
+    {% else %}
+      <a class="btn secondary" href="{% url 'login' %}">Connexion</a>
+    {% endif %}
+  </nav>
+</div></header>
+<main>
+  {% if messages %}<ul class="messages" aria-live="polite">{% for message in messages %}<li class="message {{ message.tags }}" {% if message.tags == 'error' %}role="alert"{% endif %}>{{ message }}</li>{% endfor %}</ul>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body></html>

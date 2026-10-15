@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+{% block title %}{{ book.title }} — LivreOCR{% endblock %}
+{% block body_class %}wide{% endblock %}
+{% block content %}
+<div class="workspace" id="workspace">
+
+  <aside class="toolbox" id="toolbox" aria-label="Boîte à outils">
+    <div class="toolbox-head">
+      <strong>🧰 Boîte à outils</strong>
+      <button class="btn secondary icon-btn" id="toolbox-side" type="button" title="Placer la boîte à outils de l’autre côté" aria-label="Placer la boîte à outils de l’autre côté">⇄</button>
+    </div>
+
+    <div class="toolbox-scroll">
+      <div class="field">
+        <label for="preset">Préréglage rapide</label>
+        <select id="preset">
+          <option value="">— Choisir un préréglage —</option>
+          <option value="default">↺ Réglages d’origine</option>
+          <option value="clean">Livre propre (net, fond blanc)</option>
+          <option value="old">Livre ancien / papier jauni</option>
+          <option value="photo">Photo téléphone (ombres)</option>
+          <option value="text">Texte seul, noir et blanc</option>
+        </select>
+      </div>
+
+      <form id="settings-form" method="post" action="{% url 'save_settings' book.pk %}">
+        {% csrf_token %}
+        <details class="tool-group" open>
+          <summary>📄 Sortie et langue</summary>
+          {% include "books/_field.html" with field=settings_form.language %}
+          {% include "books/_field.html" with field=settings_form.page_format %}
+        </details>
+        <details class="tool-group" open>
+          <summary>🎨 Rendu des pages de texte</summary>
+          {% include "books/_field.html" with field=settings_form.output_mode %}
+          {% include "books/_field.html" with field=settings_form.brightness %}
+          {% include "books/_field.html" with field=settings_form.contrast %}
+          {% include "books/_field.html" with field=settings_form.clahe %}
+          {% include "books/_field.html" with field=settings_form.background_clean %}
+          {% include "books/_field.html" with field=settings_form.show_through %}
+          {% include "books/_field.html" with field=settings_form.denoise_mode %}
+          {% include "books/_field.html" with field=settings_form.unsharp %}
+        </details>
+        <details class="tool-group photo-group" {% if photo_count %}open{% endif %}>
+          <summary>📷 Pages avec photo{% if photo_count %} ({{ photo_count }}){% endif %}</summary>
+          <p class="muted">Rendu à part pour les pages marquées « 📷 Page avec photo » dans l’aperçu. Les autres pages gardent le rendu ci-dessus.</p>
+          {% include "books/_field.html" with field=settings_form.photo_output_mode %}
+          {% include "books/_field.html" with field=settings_form.photo_brightness %}
+          {% include "books/_field.html" with field=settings_form.photo_contrast %}
+          {% include "books/_field.html" with field=settings_form.photo_clahe %}
+          {% include "books/_field.html" with field=settings_form.photo_background_clean %}
+          {% include "books/_field.html" with field=settings_form.photo_show_through %}
+          {% include "books/_field.html" with field=settings_form.photo_denoise_mode %}
+          {% include "books/_field.html" with field=settings_form.photo_unsharp %}
+        </details>
+        <details class="tool-group">
+          <summary>✂️ Recadrage et orientation</summary>
+          {% include "books/_field.html" with field=settings_form.auto_crop_page %}
+          {% include "books/_field.html" with field=settings_form.crop_margins %}
+          {% include "books/_field.html" with field=settings_form.crop_padding %}
+          {% include "books/_field.html" with field=settings_form.auto_rotate %}
+          {% include "books/_field.html" with field=settings_form.deskew %}
+        </details>
+        {% for field in settings_form.hidden_fields %}{{ field }}{% endfor %}
+      </form>
+
+      {% if pages %}
+      <details class="tool-group">
+        <summary>🗂 Pages importées ({{ pages|length }})</summary>
+        <div class="page-list">
+        {% for page in pages %}
+          <div class="page-row"><span><strong>{{ page.order }}.</strong> {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</span><span class="muted">{{ page.image.size|filesizeformat }}</span></div>
+        {% endfor %}
+        </div>
+        <p class="muted">L’ordre suit l’ordre d’import.</p>
+      </details>
+      {% endif %}
+
+      <details class="tool-group danger-zone">
+        <summary>🗑 Supprimer ce livre</summary>
+        <p class="muted">Supprime le projet et ses fichiers associés.</p>
+        <form method="post" action="{% url 'delete_book' book.pk %}" onsubmit="return confirm('Supprimer définitivement ce livre et ses fichiers ?')">
+          {% csrf_token %}<button class="btn danger" type="submit">Supprimer le livre</button>
+        </form>
+      </details>
+    </div>
+
+    <div class="toolbox-foot">
+      <button class="btn secondary" type="submit" form="settings-form">💾 Enregistrer les réglages</button>
+      {% if pages %}
+      <form id="process-form" method="post" action="{% url 'process_book' book.pk %}">
+        {% csrf_token %}
+        {% for field in settings_form %}{{ field.as_hidden }}{% endfor %}
+        <button id="process-submit" class="btn" type="submit">🚀 Lancer l’OCR</button>
+      </form>
+      {% endif %}
+    </div>
+  </aside>
+
+  <section class="stage">
+    <header class="stage-head">
+      <div class="stage-title">
+        <a class="muted" href="{% url 'dashboard' %}">← Mes livres</a>
+        <h1 class="book-title">{{ book.title }}</h1>
+        <span class="status {{ book.status }}" aria-label="État du livre : {{ book.get_status_display }}">{{ book.get_status_display }}</span>
+      </div>
+      {% if book.output_pdf %}<a class="btn" href="{% url 'download_pdf' book.pk %}">⬇ Télécharger le PDF</a>{% endif %}
+    </header>
+
+    <p class="muted stage-status" id="processing-status" role="status" aria-live="polite">
+      {% if book.status == "processing" %}Traitement OCR en cours, cela peut prendre quelques minutes.{% elif book.status == "done" %}Traitement terminé : votre PDF consultable est disponible.{% elif book.status == "error" %}Le traitement a échoué. Consultez le détail ci-dessous, puis réessayez.{% elif pages %}Réglez le rendu dans la boîte à outils, vérifiez l’aperçu, puis lancez l’OCR.{% else %}Commencez par importer les images de votre livre.{% endif %}
+    </p>
+
+    {% if book.status == "error" and book.error_message %}
+    <div class="card error-panel">
+      <h2 class="error-heading">Détail de l’erreur</h2><pre class="error-detail">{{ book.error_message }}</pre>
+    </div>
+    {% endif %}
+
+    {% if pages %}
+    <div class="preview" id="preview" data-url-template="{% url 'preview_page' book.pk 0 %}" aria-busy="true">
+      <div class="preview-bar">
+        <button class="btn secondary" id="preview-previous" type="button" aria-label="Afficher la page précédente">←</button>
+        <select id="preview-page" aria-label="Sélectionner la page à prévisualiser">
+          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}">{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</option>{% endfor %}
+        </select>
+        <button class="btn secondary" id="preview-next" type="button" aria-label="Afficher la page suivante">→</button>
+        <label class="photo-toggle" title="Cette page contient une photo : elle utilise les réglages du groupe « Pages avec photo »">
+          <input type="checkbox" id="photo-toggle"> 📷 Page avec photo
+        </label>
+        <span class="rotate-group" role="group" aria-label="Pivoter cette page">
+          <button class="btn secondary" id="rotate-ccw" type="button" title="Pivoter à gauche" aria-label="Pivoter la page de 90° vers la gauche">↺</button>
+          <button class="btn secondary" id="rotate-cw" type="button" title="Pivoter à droite" aria-label="Pivoter la page de 90° vers la droite">↻</button>
+        </span>
+        <div class="zoom-controls" role="group" aria-label="Zoom de l’aperçu">
+          <button class="btn secondary" id="zoom-out" type="button" aria-label="Réduire le zoom">−</button>
+          <input id="zoom-range" type="range" min="100" max="400" step="25" value="100" aria-label="Niveau de zoom">
+          <button class="btn secondary" id="zoom-in" type="button" aria-label="Augmenter le zoom">+</button>
+          <output id="zoom-value" for="zoom-range">100 %</output>
+          <button class="btn secondary" id="zoom-reset" type="button">Ajuster</button>
+        </div>
+      </div>
+      <div class="preview-grid">
+        <figure><figcaption>Original</figcaption><div class="preview-image-wrap"><img id="preview-before" alt="Page originale" src="{{ pages.0.image.url }}"></div></figure>
+        <figure><figcaption>Avec les réglages <span id="preview-state" class="muted" role="status" aria-live="polite">Préparation de l’aperçu…</span></figcaption><div class="preview-image-wrap"><img id="preview-after" alt="Page traitée avec les réglages actuels" hidden><span id="preview-placeholder" class="preview-placeholder">L’aperçu traité apparaîtra ici.</span></div></figure>
+      </div>
+      <p class="muted preview-note">Rien n’est enregistré tant que vous ne cliquez pas sur « Enregistrer les réglages ». Le redressement figure dans l’aperçu ; seule la rotation automatique (pages à l’envers) est appliquée par l’OCR.</p>
+    </div>
+    {% endif %}
+
+    <details class="card import-card" {% if not pages %}open{% endif %}>
+      <summary><strong>{% if pages %}➕ Ajouter des pages{% else %}1. Importer les pages{% endif %}</strong></summary>
+      <p>Formats acceptés : JPG, PNG, TIFF, BMP et WebP. Maximum 500 images par import, 30 Mo par image. Scannez à 300 DPI minimum (400 à 600 DPI pour les petits caractères). Pour un ordre fiable, nommez les fichiers page_001, page_002, etc.</p>
+      <form id="upload-form" method="post" enctype="multipart/form-data" action="{% url 'upload_pages' book.pk %}" data-max-files="500" data-max-file-size="31457280">
+        {% csrf_token %}
+        <label for="images">Sélectionner plusieurs images</label>
+        <input id="images" type="file" name="images" accept=".jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp" multiple required aria-describedby="upload-help upload-feedback">
+        <div id="upload-help" class="muted">Sélectionnez plusieurs fichiers à la fois. Vous pourrez contrôler la liste avant l’envoi.</div>
+        <div id="upload-feedback" class="upload-summary" aria-live="polite" hidden></div>
+        <p><button id="upload-submit" class="btn" type="submit" disabled>Choisir les images</button></p>
+      </form>
+    </details>
+  </section>
+</div>
+{% if pages %}
+<script>
+(function () {
+  var box = document.getElementById("preview");
+  var form = document.getElementById("settings-form");
+  var select = document.getElementById("preview-page");
+  var before = document.getElementById("preview-before");
+  var after = document.getElementById("preview-after");
+  var placeholder = document.getElementById("preview-placeholder");
+  var state = document.getElementById("preview-state");
+  var previous = document.getElementById("preview-previous");
+  var next = document.getElementById("preview-next");
+  var pages = {{ preview_pages_json|safe }};
+  var timer = null, counter = 0;
+
+  function params() {
+    var data = new FormData(form);
+    data.delete("csrfmiddlewaretoken");
+    return new URLSearchParams(data).toString();
+  }
+  var zoomRange = document.getElementById("zoom-range");
+  var zoomValue = document.getElementById("zoom-value");
+  var wraps = box.querySelectorAll(".preview-image-wrap");
+  var lastSize = 1000, syncing = false;
+
+  // Ask the server for a sharper preview once the user zooms in far enough to need it.
+  function previewSize() { return Number(zoomRange.value) > 150 ? 2000 : 1000; }
+  function setZoom(value) {
+    value = Math.min(400, Math.max(100, value));
+    zoomRange.value = value;
+    zoomValue.textContent = value + " %";
+    box.classList.toggle("zoomed", value > 100);
+    [before, after].forEach(function (img) { img.style.width = value > 100 ? value + "%" : ""; });
+    if (previewSize() !== lastSize) refresh();
+  }
+  zoomRange.addEventListener("input", function () { setZoom(Number(zoomRange.value)); });
+  document.getElementById("zoom-in").addEventListener("click", function () { setZoom(Number(zoomRange.value) + 25); });
+  document.getElementById("zoom-out").addEventListener("click", function () { setZoom(Number(zoomRange.value) - 25); });
+  document.getElementById("zoom-reset").addEventListener("click", function () { setZoom(100); });
+  [before, after].forEach(function (img) {
+    img.addEventListener("dblclick", function () { setZoom(Number(zoomRange.value) > 100 ? 100 : 250); });
+  });
+  // Keep both panes aligned so the original and processed page can be compared at the same spot.
+  wraps.forEach(function (wrap, i) {
+    wrap.addEventListener("scroll", function () {
+      if (syncing) return;
+      syncing = true;
+      var other = wraps[1 - i];
+      other.scrollLeft = wrap.scrollLeft;
+      other.scrollTop = wrap.scrollTop;
+      syncing = false;
+    });
+  });
+
+  function refresh() {
+    lastSize = previewSize();
+    var id = select.value, mine = ++counter;
+    before.src = pages[id];
+    box.setAttribute("aria-busy", "true");
+    state.textContent = "Mise à jour de l’aperçu…";
+    var url = box.dataset.urlTemplate.replace(/0\/$/, id + "/") + "?" + params() + "&size=" + previewSize();
+    var img = new Image();
+    img.onload = function () {
+      if (mine !== counter) return;
+      after.src = img.src;
+      after.hidden = false;
+      placeholder.hidden = true;
+      state.textContent = "Aperçu à jour.";
+      box.setAttribute("aria-busy", "false");
+    };
+    img.onerror = function () {
+      if (mine !== counter) return;
+      after.hidden = true;
+      placeholder.hidden = false;
+      placeholder.textContent = "Impossible de créer l’aperçu. Vérifiez les réglages puis réessayez.";
+      state.textContent = "Aperçu indisponible.";
+      box.setAttribute("aria-busy", "false");
+    };
+    img.src = url;
+  }
+  function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 300); }
+  form.addEventListener("input", schedule);
+  form.addEventListener("change", schedule);
+  select.addEventListener("change", refresh);
+  function movePage(direction) {
+    var index = select.selectedIndex + direction;
+    if (index < 0) index = select.options.length - 1;
+    if (index >= select.options.length) index = 0;
+    select.selectedIndex = index;
+    refresh();
+  }
+  // Manual turn of the page shown, saved on the server and used by the final PDF too.
+  var rotateUrl = box.dataset.urlTemplate.replace("apercu/0/", "pages/ID/pivoter/");
+  var csrf = form.querySelector("input[name=csrfmiddlewaretoken]").value;
+  function rotatePage(direction) {
+    var body = new URLSearchParams({direction: direction});
+    fetch(rotateUrl.replace("ID", select.value), {method: "POST", headers: {"X-CSRFToken": csrf}, body: body})
+      .then(function (response) { if (!response.ok) throw new Error(); refresh(); })
+      .catch(function () { state.textContent = "Rotation impossible."; });
+  }
+  // "Page avec photo": per-page switch to the separate photo rendering settings.
+  var photoToggle = document.getElementById("photo-toggle");
+  var photoUrl = box.dataset.urlTemplate.replace("apercu/0/", "pages/ID/photo/");
+  function syncPhotoToggle() { photoToggle.checked = select.options[select.selectedIndex].dataset.photo === "1"; }
+  photoToggle.addEventListener("change", function () {
+    var option = select.options[select.selectedIndex];
+    var body = new URLSearchParams({value: photoToggle.checked ? "1" : "0"});
+    fetch(photoUrl.replace("ID", select.value), {method: "POST", headers: {"X-CSRFToken": csrf}, body: body})
+      .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+      .then(function (data) {
+        option.dataset.photo = data.has_photo ? "1" : "0";
+        option.textContent = option.textContent.replace(" 📷", "") + (data.has_photo ? " 📷" : "");
+        refresh();
+      })
+      .catch(function () { photoToggle.checked = !photoToggle.checked; state.textContent = "Enregistrement impossible."; });
+  });
+  select.addEventListener("change", syncPhotoToggle);
+  syncPhotoToggle();
+  document.getElementById("rotate-ccw").addEventListener("click", function () { rotatePage("ccw"); });
+  document.getElementById("rotate-cw").addEventListener("click", function () { rotatePage("cw"); });
+  previous.addEventListener("click", function () { movePage(-1); });
+  next.addEventListener("click", function () { movePage(1); });
+  refresh();
+
+  var presets = {
+    default: {photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
+              photo_background_clean: false, photo_show_through: 0, photo_denoise_mode: "off", photo_unsharp: 0.3,
+              language: "fra+eng", page_format: "a4", output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: false,
+              background_clean: false, show_through: 0, denoise_mode: "off", unsharp: 0, auto_crop_page: true,
+              crop_margins: true, crop_padding: 20, auto_rotate: true, deskew: true},
+    clean: {output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: true, background_clean: true, show_through: 0.4, denoise_mode: "off", unsharp: 0.5, deskew: true},
+    old:   {output_mode: "color", brightness: 1.05, contrast: 1.1, clahe: true, background_clean: true, show_through: 0.6, denoise_mode: "edge", unsharp: 0.7, deskew: true},
+    photo: {output_mode: "gray", brightness: 1.0, contrast: 1.0, clahe: true, background_clean: true, show_through: 0.6, denoise_mode: "edge", unsharp: 0.8, deskew: true},
+    text:  {output_mode: "bw", brightness: 1.0, contrast: 1.0, clahe: false, background_clean: true, show_through: 0.6, denoise_mode: "median", unsharp: 0.3, deskew: true}
+  };
+  document.getElementById("preset").addEventListener("change", function () {
+    var p = presets[this.value];
+    if (!p) return;
+    Object.keys(p).forEach(function (name) {
+      var el = form.elements[name];
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = p[name]; else el.value = p[name];
+    });
+    schedule();
+  });
+
+  // Launching the OCR uses the settings currently shown, even if not saved yet.
+  var processForm = document.querySelector('form[action="{% url 'process_book' book.pk %}"]');
+  processForm.addEventListener("submit", function (event) {
+    var processButton = document.getElementById("process-submit");
+    if (processForm.dataset.submitting === "true") {
+      event.preventDefault();
+      return;
+    }
+    processForm.dataset.submitting = "true";
+    processButton.disabled = true;
+    processButton.textContent = "Traitement en cours…";
+    document.getElementById("processing-status").textContent = "Votre demande est envoyée. Le traitement OCR peut prendre quelques minutes ; gardez cette page ouverte.";
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name || el.name === "csrfmiddlewaretoken") return;
+      var hidden = processForm.querySelector('input[type=hidden][name="' + el.name + '"]');
+      if (!hidden) return;
+      if (el.type === "checkbox") { hidden.value = el.checked ? "on" : ""; }
+      else { hidden.value = el.value; }
+    });
+  });
+})();
+</script>
+{% endif %}
+<script>
+(function () {
+  var form = document.getElementById("upload-form");
+  var input = document.getElementById("images");
+  var feedback = document.getElementById("upload-feedback");
+  var button = document.getElementById("upload-submit");
+  if (!form || !input || !feedback || !button) return;
+  var maxFiles = Number(form.dataset.maxFiles);
+  var maxFileSize = Number(form.dataset.maxFileSize);
+  var allowed = /\.(jpe?g|png|tiff?|bmp|webp)$/i;
+  function formatSize(bytes) {
+    return bytes < 1024 * 1024 ? Math.ceil(bytes / 1024) + " Ko" : (bytes / (1024 * 1024)).toFixed(1) + " Mo";
+  }
+  function inspect() {
+    var files = Array.prototype.slice.call(input.files);
+    feedback.hidden = files.length === 0;
+    feedback.replaceChildren();
+    button.disabled = files.length === 0;
+    if (!files.length) {
+      button.textContent = "Choisir les images";
+      return;
+    }
+    var heading = document.createElement("strong");
+    heading.textContent = files.length + " fichier(s) sélectionné(s)";
+    feedback.appendChild(heading);
+    var list = document.createElement("ul");
+    var invalidCount = 0;
+    files.forEach(function (file) {
+      var item = document.createElement("li");
+      var reasons = [];
+      if (!allowed.test(file.name)) reasons.push("format non accepté");
+      if (file.size > maxFileSize) reasons.push("dépasse 30 Mo");
+      if (files.length > maxFiles) reasons.push("limite de 500 fichiers dépassée");
+      item.textContent = file.name + " — " + formatSize(file.size) + (reasons.length ? " — " + reasons.join(", ") : "");
+      if (reasons.length) {
+        item.className = "invalid-file";
+        invalidCount += 1;
+      }
+      list.appendChild(item);
+    });
+    feedback.appendChild(list);
+    var validCount = files.length - invalidCount;
+    var total = files.reduce(function (sum, file) { return sum + file.size; }, 0);
+    var summary = document.createElement("p");
+    summary.className = invalidCount ? "error-text" : "muted";
+    summary.textContent = validCount + " image(s) valide(s) sur " + files.length + " · Taille totale : " + formatSize(total);
+    feedback.appendChild(summary);
+    button.disabled = invalidCount > 0;
+    button.textContent = invalidCount ? "Corriger la sélection" : "Importer " + files.length + " image(s)";
+  }
+  input.addEventListener("change", inspect);
+  form.addEventListener("submit", function (event) {
+    inspect();
+    if (button.disabled) event.preventDefault();
+    else {
+      button.disabled = true;
+      button.textContent = "Import en cours…";
+    }
+  });
+})();
+</script>
+<script>
+(function () {
+  var workspace = document.getElementById("workspace");
+  var sideButton = document.getElementById("toolbox-side");
+  function store(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
+  function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  if (load("livreocr-toolbox") === "right") workspace.classList.add("toolbox-right");
+  sideButton.addEventListener("click", function () {
+    workspace.classList.toggle("toolbox-right");
+    store("livreocr-toolbox", workspace.classList.contains("toolbox-right") ? "right" : "left");
+  });
+  // Show the current value next to each slider.
+  document.querySelectorAll("output.range-value").forEach(function (out) {
+    var input = document.getElementById(out.dataset.for);
+    if (!input) return;
+    function show() { out.textContent = Number(input.value).toFixed(2).replace(/\.?0+$/, ""); }
+    input.addEventListener("input", show);
+    input.addEventListener("change", show);
+    document.getElementById("preset").addEventListener("change", function () { setTimeout(show, 0); });
+    show();
+  });
+})();
+</script>
+{% endblock %}

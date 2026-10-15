@@ -1,0 +1,10 @@
+<div class="field{% if field.field.widget.input_type == 'checkbox' %} checkbox-field{% endif %}">
+  {% if field.field.widget.input_type == "checkbox" %}
+    <label for="{{ field.id_for_label }}">{{ field }}<span>{{ field.label }}</span></label>
+  {% else %}
+    <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.widget.input_type == "range" %} <output class="range-value" data-for="{{ field.id_for_label }}"></output>{% endif %}</label>
+    {{ field }}
+  {% endif %}
+  {% if field.help_text %}<div class="muted field-help">{{ field.help_text }}</div>{% endif %}
+  {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+</div>

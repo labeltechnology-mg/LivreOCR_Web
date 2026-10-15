@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Tableau de bord — LivreOCR{% endblock %}
+{% block content %}
+<div class="row between page-heading">
+  <div><h1>Mes livres</h1><p>Importez vos photos ou scans, puis créez un PDF avec texte recherchable.</p></div>
+  <a class="btn" href="{% url 'create_book' %}">＋ Nouveau livre</a>
+</div>
+{% if summary.book_count %}
+<section class="summary-grid" aria-label="Résumé de votre bibliothèque">
+  <div class="summary-item"><span class="summary-number">{{ summary.book_count }}</span><span class="summary-label">livre(s)</span></div>
+  <div class="summary-item"><span class="summary-number">{{ summary.page_count }}</span><span class="summary-label">page(s) importée(s)</span></div>
+  <div class="summary-item"><span class="summary-number">{{ summary.ready_count }}</span><span class="summary-label">PDF consultable(s)</span></div>
+</section>
+{% endif %}
+{% if books %}
+<div class="grid">
+{% for book in books %}
+  <a class="card book-card" href="{% url 'book_detail' book.pk %}">
+    <div class="row between"><span class="status {{ book.status }}">{{ book.get_status_display }}</span><span class="muted">{{ book.created_at|date:"d/m/Y" }}</span></div>
+    <h2 class="book-card-title">{{ book.title }}</h2>
+    <p>{{ book.page_count }} page(s) importée(s)</p>
+    <div class="book-meta">
+      <span class="muted">Modifié le {{ book.updated_at|date:"d/m/Y" }}</span>
+      {% if book.status == "done" %}<span class="muted">PDF consultable disponible</span>{% elif book.status == "error" %}<span class="error-text">Une vérification est nécessaire</span>{% elif book.status == "new" %}<span class="muted">{% if book.page_count %}Prêt pour les réglages{% else %}Importez des pages pour commencer{% endif %}</span>{% endif %}
+    </div>
+  </a>
+{% endfor %}
+</div>
+{% else %}
+<div class="card empty-state">
+  <h2>Aucun livre pour le moment</h2><p>Créez un premier projet pour commencer le traitement OCR.</p>
+  <a class="btn" href="{% url 'create_book' %}">Créer mon premier livre</a>
+</div>
+{% endif %}
+{% endblock %}

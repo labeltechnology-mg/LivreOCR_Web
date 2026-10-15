@@ -45,6 +45,30 @@ class ImageProcessingTests(TestCase):
         self.assertEqual(fit_to_a4(Image.new("RGB", (900, 1400))).size, A4_PX)
         self.assertEqual(fit_to_a4(Image.new("RGB", (1400, 900))).size, A4_PX[::-1])
 
+    def test_a4_margin_and_alignment(self):
+        wide = Image.new("RGB", (1000, 1100), "black")           # squarer than A4: free space above and below
+        sheet = np.array(fit_to_a4(wide, margin_mm=10, align="top").convert("L"))
+        rows = np.where(sheet.min(axis=1) == 0)[0]
+        self.assertAlmostEqual(rows[0], round(10 * 300 / 25.4), delta=2)          # starts at the margin
+        self.assertGreater(sheet.shape[0] - rows[-1], 800)                        # free space is all below
+        centred = np.array(fit_to_a4(wide, margin_mm=10).convert("L"))
+        rows = np.where(centred.min(axis=1) == 0)[0]
+        self.assertAlmostEqual(rows[0], centred.shape[0] - rows[-1], delta=3)     # balanced above and below
+
+    def test_neighbour_edge_is_trimmed_only_next_to_a_dark_page(self):
+        from .image_processing import trim_neighbour_edges
+        page = Image.new("RGB", (800, 1000), (35, 25, 15))
+        draw = ImageDraw.Draw(page)
+        for i, colour in enumerate([(70, 100, 60), (200, 150, 30), (170, 100, 60), (110, 80, 60), (235, 235, 235)] * 2):
+            draw.rectangle((760, i * 100, 800, i * 100 + 99), fill=colour)     # coloured index tabs of the page stack
+        trimmed = trim_neighbour_edges(page)
+        self.assertLessEqual(trimmed.width, 765)
+        self.assertEqual(trimmed.height, 1000)
+        margin = Image.new("RGB", (800, 1000), (35, 25, 15))
+        ImageDraw.Draw(margin).rectangle((760, 0, 800, 1000), fill=(245, 245, 245))   # plain white margin
+        self.assertEqual(trim_neighbour_edges(margin).size, (800, 1000))
+        self.assertEqual(trim_neighbour_edges(text_page()).size, (1200, 1600))         # a white text page is untouched
+
     def test_skew_is_detected_and_straight_pages_are_left_alone(self):
         self.assertAlmostEqual(abs(estimate_skew(text_page(skew=2.0))), 2.0, delta=0.4)
         self.assertEqual(estimate_skew(text_page()), 0.0)
@@ -243,7 +267,8 @@ class ViewTests(TestCase):
         self.client.force_login(self.owner)
         self.assertEqual(self.client.get(f"/livres/{self.book.pk}/").status_code, 200)
         preview = self.client.get(f"/livres/{self.book.pk}/apercu/{self.page.pk}/", {
-            "language": "fra", "page_format": "a4", "output_mode": "color", "brightness": 1, "contrast": 1,
+            "language": "fra", "page_format": "a4", "a4_margin_mm": 5, "a4_align": "center",
+            "output_mode": "color", "brightness": 1, "contrast": 1,
             "unsharp": 0, "show_through": 0, "denoise_mode": "off", "crop_padding": 20,
             "photo_output_mode": "color", "photo_brightness": 1.3, "photo_contrast": 1.1,
             "photo_unsharp": 0.3, "photo_show_through": 0, "photo_denoise_mode": "off",

@@ -176,7 +176,60 @@ def crop_to_page(image: Image.Image, fallback=None) -> Image.Image:
     target = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], np.float32)
     matrix = cv2.getPerspectiveTransform(quad, target)
     warped = cv2.warpPerspective(np.array(image), matrix, (width, height), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    return Image.fromarray(warped)
+    return trim_neighbour_edges(Image.fromarray(warped))
+
+EDGE_DEPTH = 0.08          # how far from the border (share of the page size) a neighbour's edge is looked for
+EDGE_STEP = 35             # tone jump (0-255) that makes a boundary
+EDGE_VARIATION = 18        # a neighbour's edge (coloured tabs, stacked pages) varies along the strip
+
+def trim_neighbour_edges(image: Image.Image) -> Image.Image:
+    """Cut off the edge of the neighbouring pages that shows next to a dark page.
+
+    On a page that is a dark picture right up to its border, the quad found from the sibling
+    pages can reach past the paper onto the side of the page stack (coloured index tabs, the
+    edges of other leaves). That strip is brighter than the picture, separated from it by a sharp
+    straight boundary, and unlike a white margin it varies along its length. Only then is it cut.
+    """
+    scale = min(1.0, 800 / max(image.size))
+    small = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.BILINEAR) if scale < 1 else image
+    gray = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2GRAY).astype(np.float32)
+    h, w = gray.shape
+
+    def cut_from_far_edge(g: np.ndarray) -> int:
+        """Number of pixels to remove from the far (right) edge of g, 0 when there is no strip."""
+        rows = slice(int(g.shape[0] * 0.1), int(g.shape[0] * 0.9))
+        depth = int(g.shape[1] * EDGE_DEPTH)
+        if depth < 8:
+            return 0
+        profile = g[rows, g.shape[1] - depth:].mean(axis=0)            # columns, inside -> outside
+        best, best_jump = 0, 0.0
+        for x in range(4, depth - 2):
+            jump = float(profile[x:x + 3].mean() - profile[x - 4:x].mean())
+            if jump > best_jump:
+                best, best_jump = x, jump
+        if best_jump < EDGE_STEP:
+            return 0
+        start = g.shape[1] - depth + best
+        inside = g[rows, max(0, start - int(g.shape[1] * 0.03)):start].mean()
+        strip = g[rows, start + 2:g.shape[1]]
+        if inside > 110 or strip.shape[1] < 3:
+            return 0                                                   # the page is not dark up to the boundary
+        along = strip.mean(axis=1)
+        if float(along.std()) < EDGE_VARIATION:
+            return 0                                                   # a uniform strip is just a margin
+        return g.shape[1] - start
+
+    cuts = {
+        "right": cut_from_far_edge(gray),
+        "left": cut_from_far_edge(gray[:, ::-1]),
+        "bottom": cut_from_far_edge(gray.T),
+        "top": cut_from_far_edge(gray.T[:, ::-1]),
+    }
+    if not any(cuts.values()):
+        return image
+    left, right = round(cuts["left"] / scale), round(cuts["right"] / scale)
+    top, bottom = round(cuts["top"] / scale), round(cuts["bottom"] / scale)
+    return image.crop((left, top, image.width - right, image.height - bottom))
 
 def apply_clahe(image: Image.Image) -> Image.Image:
     """Moderate local contrast (CLAHE) on the lightness channel only, so colors stay natural."""
@@ -265,21 +318,24 @@ def binarize(image: Image.Image) -> Image.Image:
     return Image.fromarray(bw).convert("RGB")
 
 A4_PX = (2480, 3508)  # 210 x 297 mm at 300 dpi
-A4_MARGIN_PX = 59     # about 5 mm at 300 dpi
+A4_PX_PER_MM = 300 / 25.4
 
-def fit_to_a4(image: Image.Image, scale: float = 1.0) -> Image.Image:
-    """Center the page on a white A4 sheet (portrait or landscape), keeping its proportions.
+def fit_to_a4(image: Image.Image, scale: float = 1.0, margin_mm: float = 5.0, align: str = "center") -> Image.Image:
+    """Place the page on a white A4 sheet (portrait or landscape), keeping its proportions.
 
     scale < 1 produces a smaller sheet with the same layout, used for previews.
+    margin_mm: white border kept around the page. align: "center" or "top" (the free space,
+    when the page is not as tall as the sheet, then goes below instead of above and below).
     """
     width, height = A4_PX if image.height >= image.width else A4_PX[::-1]
     sheet_w, sheet_h = max(1, round(width * scale)), max(1, round(height * scale))
-    margin = round(A4_MARGIN_PX * scale)
+    margin = round(margin_mm * A4_PX_PER_MM * scale)
     ratio = min((sheet_w - 2 * margin) / image.width, (sheet_h - 2 * margin) / image.height)
     size = (max(1, round(image.width * ratio)), max(1, round(image.height * ratio)))
     resized = image.resize(size, Image.LANCZOS)
     sheet = Image.new("RGB", (sheet_w, sheet_h), "white")
-    sheet.paste(resized, ((sheet_w - size[0]) // 2, (sheet_h - size[1]) // 2))
+    top = margin if align == "top" else (sheet_h - size[1]) // 2
+    sheet.paste(resized, ((sheet_w - size[0]) // 2, top))
     return sheet
 
 _rotation_cache: dict = {}
@@ -365,7 +421,8 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
             padding = round(padding * max(image.size) / base_side)
         image = crop_page(image, padding)
     if book.page_format == "a4":
-        image = fit_to_a4(image, scale=max_side / A4_PX[1] if max_side else 1.0)
+        image = fit_to_a4(image, scale=max_side / A4_PX[1] if max_side else 1.0,
+                          margin_mm=book.a4_margin_mm, align=book.a4_align)
     return image
 
 def preprocess_image(source: Path, destination: Path, book, extra_rotation: int = 0,

@@ -238,13 +238,19 @@ def process_book(request, pk):
     try:
         with tempfile.TemporaryDirectory(prefix="livreocr_export_") as tmp:
             output = Path(tmp) / "livre_recherchable.pdf"
-            build_searchable_pdf(book, pages, output)
+            toc = build_searchable_pdf(book, pages, output)
             with output.open("rb") as pdf_file:
                 filename = f"livre_{book.pk}_recherchable.pdf"
                 book.output_pdf.save(filename, pdf_file, save=False)
             book.status = "done"
             book.save()
         messages.success(request, "PDF consultable créé avec succès.")
+        if toc.get("links"):
+            messages.success(request, (
+                f"Table des matières : {toc['links']} lien(s) cliquable(s) sur {toc['toc_pages']} page(s)"
+                + (f" ; {toc['unresolved']} entrée(s) renvoient à des pages absentes du livre et n’ont pas de lien." if toc["unresolved"] else ".")))
+        elif toc.get("toc_pages"):
+            messages.warning(request, "Une table des matières a été repérée, mais aucune de ses entrées ne renvoie à une page importée.")
     except Exception as exc:
         book.status = "error"
         book.error_message = str(exc)[:6000]

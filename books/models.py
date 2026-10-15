@@ -46,6 +46,7 @@ class Book(models.Model):
     photo_show_through = models.FloatField(default=0.0)
     photo_denoise_mode = models.CharField(max_length=10, choices=DENOISE_MODES, default="off")
     photo_unsharp = models.FloatField(default=0.3)
+    toc_links = models.BooleanField(default=True)  # make table-of-contents entries clickable in the PDF
     auto_crop_page = models.BooleanField(default=True)
     crop_margins =models.BooleanField(default=True)
     crop_padding = models.PositiveIntegerField(default=20)

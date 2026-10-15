@@ -4,12 +4,16 @@ import subprocess
 import tempfile
 from PIL import Image
 from .image_processing import preprocess_image, same_side_neighbours
+from .toc import add_toc_links
 
 class OCRProcessingError(Exception):
     pass
 
-def build_searchable_pdf(book, pages, output_path: Path) -> None:
-    """Create a PDF from processed page images and add a searchable OCR text layer."""
+def build_searchable_pdf(book, pages, output_path: Path) -> dict:
+    """Create a PDF from processed page images and add a searchable OCR text layer.
+
+    Returns the table-of-contents statistics ({} when links are off or nothing was found).
+    """
     if not shutil.which("ocrmypdf"):
         raise OCRProcessingError(
             "La commande ocrmypdf est introuvable. Installez OCRmyPDF et Tesseract."
@@ -46,3 +50,11 @@ def build_searchable_pdf(book, pages, output_path: Path) -> None:
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode != 0 or not output_path.exists():
             raise OCRProcessingError((result.stderr or result.stdout or "Échec OCR")[-6000:])
+
+        if not book.toc_links:
+            return {}
+        try:
+            # The page images are re-read here, so this must run before the temporary folder is removed.
+            return add_toc_links(output_path, processed_paths, book.language)
+        except Exception:
+            return {}   # links are a bonus: never lose the finished PDF because of them

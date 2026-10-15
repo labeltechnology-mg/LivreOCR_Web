@@ -59,6 +59,14 @@ gunicorn config.wsgi:application
 ```
 Servez les médias via un stockage privé ou une couche de téléchargement authentifiée. Pour une vraie production, configurez HTTPS, sauvegardes, limites de débit, quotas, antivirus de fichiers, journaux et politique de conservation.
 
+## Table des matières cliquable
+Si un livre contient une page de table des matières (« Table des matières », « Sommaire », « Inhaltsverzeichnis »… ou des lignes « Titre ……… 17 »), le PDF obtenu est cliquable comme un vrai PDF : chaque ligne renvoie à sa page, et un signet est ajouté dans le volet de navigation du lecteur PDF. Option « Table des matières cliquable » dans *Sortie et langue*.
+
+- Le numéro de la table est le numéro **imprimé** : l'application lit le numéro en haut ou en bas de chaque page (« 16 », « | 17 », « page 35 »).
+- Un lien n'est créé que si la page visée est dans le livre. Si seules quelques pages ont été importées, les entrées vers des pages absentes restent sans lien (le message de fin de traitement indique leur nombre).
+- Un numéro mal lu qui contredirait l'ordre croissant de la table est ignoré plutôt que relié à une mauvaise page.
+- Les points de conduite sont effacés uniquement sur la copie lue pour trouver les numéros : l'image du PDF les garde.
+
 ## Docker
 L'image contient Tesseract (fra, eng, deu, lat, spa, por, osd et l'allemand gothique `deu_latf`), Ghostscript et ocrmypdf : rien d'autre à installer.
 

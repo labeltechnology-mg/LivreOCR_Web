@@ -1,6 +1,7 @@
 import io
 import shutil
 import tempfile
+import unittest
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,7 @@ from .image_processing import (
     A4_PX, detect_page_quad, estimate_skew, fit_to_a4, process_image, reduce_show_through,
 )
 from .models import Book, PageImage
+from .orientation import find_tesseract
 
 TEXT = "Texte de test pour la detection des pages dans un livre"
 
@@ -109,6 +111,111 @@ class ClassifyTests(TestCase):
         for row in range(8):
             draw.text((140, 930 + row * 40), TEXT, fill="white")
         self.assertEqual(classify_page(boxed)[0], TEXT)
+
+
+class TocParsingTests(TestCase):
+    @staticmethod
+    def line(text, y=700, x1=520):
+        from .toc import Line
+        return Line(text, 80, y, x1, y + 12)
+
+    def test_entries_with_dot_leaders_are_found(self):
+        from .toc import toc_entries
+        lines = [self.line("Table des matières", 780), self.line("Introduction ........ 3", 700),
+                 self.line("Le premier chapitre ........ 15", 660), self.line("Le second chapitre ........ 28", 620),
+                 self.line("Conclusion ........ 40", 580)]
+        entries, heading = toc_entries(595, lines)
+        self.assertTrue(heading)
+        self.assertEqual([(e.title, e.number) for e in entries],
+                         [("Introduction", 3), ("Le premier chapitre", 15), ("Le second chapitre", 28), ("Conclusion", 40)])
+
+    def test_rows_of_figures_and_plain_text_are_not_a_table_of_contents(self):
+        from .toc import toc_entries
+        figures = [self.line(f"{1880 + 5 * i}  1'325'000  89'000  7'050  {i + 3}", 700 - 30 * i) for i in range(8)]
+        self.assertEqual(toc_entries(595, figures)[0], [])
+        prose = [self.line(text, 700 - 30 * i) for i, text in enumerate([
+            "Le décret fut voté en 1828", "puis appliqué jusqu'en 1838", "et repris en mai 1840", "avant la loi de 1844"])]
+        self.assertEqual(toc_entries(595, prose)[0], [])
+
+    def test_misread_numbers_going_backwards_are_dropped(self):
+        from .toc import toc_entries
+        lines = [self.line("Sommaire", 780)] + [self.line(f"{title} ........ {number}", 700 - 40 * i)
+                 for i, (title, number) in enumerate([("Premier", 3), ("Deuxième", 5), ("Troisième", 2), ("Quatrième", 9), ("Cinquième", 12)])]
+        self.assertEqual([e.number for e in toc_entries(595, lines)[0]], [3, 5, 9, 12])
+
+    def test_page_offset_only_when_pages_are_consecutive(self):
+        from .toc import _offset
+        self.assertEqual(_offset({3: 2, 4: 3, 5: 4}), -1)
+        self.assertIsNone(_offset({35: 1, 39: 2, 45: 3}))   # scattered pages of a partial book
+        self.assertIsNone(_offset({3: 2, 4: 3}))            # too few pages to be sure
+
+    def test_printed_numbers_forms(self):
+        from .toc import _numbers_in
+        self.assertEqual(_numbers_in("16 |"), [16])
+        self.assertEqual(_numbers_in("| 17"), [17])
+        self.assertEqual(_numbers_in("page 35"), [35])
+        self.assertEqual(_numbers_in("Blickpunkt Geschichte"), [])
+
+
+@unittest.skipUnless(shutil.which("ocrmypdf") and find_tesseract(), "ocrmypdf and Tesseract are required")
+class TocEndToEndTests(TestCase):
+    def test_table_of_contents_becomes_clickable(self):
+        import pikepdf
+        from PIL import ImageFont
+        from .ocr import build_searchable_pdf
+
+        def font(names, size):
+            for name in names:
+                try:
+                    return ImageFont.truetype(name, size)
+                except OSError:
+                    continue
+            self.skipTest("no TrueType font available to draw the test pages")
+
+        width, height = 2480, 3508
+        body_font = font(("DejaVuSans.ttf", "arial.ttf", "Arial.ttf", "LiberationSans-Regular.ttf"), 56)
+        title_font = font(("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf", "LiberationSans-Bold.ttf"), 90)
+
+        def blank():
+            image = Image.new("RGB", (width, height), "white")
+            return image, ImageDraw.Draw(image)
+
+        contents, draw = blank()
+        draw.text((300, 380), "Table des matières", fill="black", font=title_font)
+        for i, (title, number) in enumerate([("Introduction", 3), ("Le premier chapitre", 4), ("Le second chapitre", 5)]):
+            y = 720 + i * 150
+            draw.text((300, y), title, fill="black", font=body_font)
+            draw.text((width - 300 - draw.textlength(str(number), font=body_font), y), str(number), fill="black", font=body_font)
+            x0 = 300 + draw.textlength(title, font=body_font) + 40
+            x1 = width - 300 - draw.textlength(str(number), font=body_font) - 40
+            draw.text((x0, y), "." * int((x1 - x0) / draw.textlength(".", font=body_font)), fill="black", font=body_font)
+        images = [contents]
+        for number in (2, 3, 4, 5):
+            page, draw = blank()
+            draw.text((300, 450), f"Chapitre page {number}", fill="black", font=title_font)
+            for row in range(8):
+                draw.text((300, 800 + row * 100), "Le texte courant de cette page du livre de test.", fill="black", font=body_font)
+            draw.text((width // 2 - 20, height - 330), str(number), fill="black", font=body_font)
+            images.append(page)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pages = []
+            for order, image in enumerate(images, 1):
+                path = Path(tmp) / f"s{order}.png"
+                image.save(path)
+                pages.append(type("P", (), {"image": type("I", (), {"path": str(path)}), "rotation": 0,
+                                            "has_photo": False, "order": order, "pk": order})())
+            book = Book(language="fra", auto_rotate=False, auto_crop_page=False, crop_margins=False,
+                        deskew=False, page_format="a4", toc_links=True)
+            output = Path(tmp) / "out.pdf"
+            stats = build_searchable_pdf(book, pages, output)
+            with pikepdf.open(output) as pdf:
+                targets = []
+                for annotation in pdf.pages[0].get("/Annots", []):
+                    destination = annotation["/Dest"][0]
+                    targets.append([i for i, p in enumerate(pdf.pages) if p.objgen == destination.objgen][0] + 1)
+        self.assertEqual(stats["toc_pages"], 1)
+        self.assertEqual(sorted(targets), [3, 4, 5])
 
 
 class ViewTests(TestCase):

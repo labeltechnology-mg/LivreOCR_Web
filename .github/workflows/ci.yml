@@ -25,6 +25,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # OCR tools: the end-to-end test of clickable tables of contents needs them.
+      - name: Install OCR tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng tesseract-ocr-osd ghostscript qpdf fonts-dejavu-core
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 

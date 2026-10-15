@@ -13,11 +13,12 @@ class BookCreateForm(forms.ModelForm):
 class ProcessingSettingsForm(forms.ModelForm):
     class Meta:
         model = Book
-        fields = ["language", "page_format", "output_mode", "brightness", "contrast", "clahe", "background_clean", "show_through", "denoise_mode", "unsharp",
+        fields = ["language", "page_format", "toc_links", "output_mode", "brightness", "contrast", "clahe", "background_clean", "show_through", "denoise_mode", "unsharp",
                   "auto_crop_page", "crop_margins", "crop_padding", "auto_rotate", "deskew",
                   "photo_output_mode", "photo_brightness", "photo_contrast", "photo_clahe",
                   "photo_background_clean", "photo_show_through", "photo_denoise_mode", "photo_unsharp"]
         labels = {
+            "toc_links": "Table des matières cliquable (liens et signets dans le PDF)",
             "photo_output_mode": "Mode de rendu",
             "photo_brightness": "Luminosité",
             "photo_contrast": "Contraste",

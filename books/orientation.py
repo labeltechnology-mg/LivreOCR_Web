@@ -29,7 +29,14 @@ def _run(tesseract: str, image: Image.Image, args: list[str], timeout: int = 90)
     with tempfile.TemporaryDirectory(prefix="livreocr_osd_") as tmp:
         path = Path(tmp) / "sample.png"
         image.save(path)
-        result = subprocess.run([tesseract, str(path), "stdout", *args], capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            [tesseract, str(path), "stdout", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
     return result.stdout if result.returncode == 0 else ""
 
 def _osd(tesseract: str, sample: Image.Image) -> tuple[int, float] | None:

@@ -129,7 +129,7 @@ input[aria-invalid=true], select[aria-invalid=true] { border-color: #a82e3b; }
 .preview { margin-bottom: 18px; }
 .preview-controls { display: grid; grid-template-columns: minmax(160px, 1fr) auto auto; gap: 8px; align-items: end; }
 .preview-controls label { margin-top: 0; }
-.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.preview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .preview-grid figure { min-width: 0; margin: 0; }
 .preview-grid figcaption { margin-bottom: 6px; font-weight: 650; }
 .preview-image-wrap { position: relative; min-height: 180px; display: grid; place-items: center; border: 1px solid #cbd3df; border-radius: 9px; background: #f0f1f3; overflow: hidden; }
@@ -180,6 +180,10 @@ body.wide .messages { margin: 0 0 6px; }
 .tool-group .field { margin-bottom: 8px; }
 .tool-group label { margin: 6px 0 3px; }
 .tool-group .checkbox-field label { margin: 4px 0; font-weight: 600; }
+.settings-note { margin: 0 0 10px; font-size: 12px; }
+.settings-subgroup { padding: 0 8px; margin: 0 0 10px; border-left: 2px solid var(--line); }
+.settings-subgroup h3 { margin: 6px 0; font-size: 13px; }
+.settings-subgroup:last-child { margin-bottom: 4px; }
 .tool-group.danger-zone { border-color: #ead0d2; }
 .toolbox input, .toolbox select { min-height: 36px; padding: 6px 9px; }
 .toolbox input[type=range] { min-height: 24px; padding: 0; border: 0; background: none; accent-color: var(--brand); }
@@ -195,10 +199,26 @@ body.wide .messages { margin: 0 0 6px; }
 .preview-bar > select { flex: 1 1 180px; min-width: 140px; width: auto; min-height: 38px; }
 .preview-bar .zoom-controls { margin: 0; flex: 1 1 260px; flex-wrap: nowrap; }
 .preview-bar .btn { padding: 7px 12px; }
+.preview-layers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.preview-layers [aria-pressed=true] { border-color: var(--brand); background: #edf2ff; color: #273f76; }
 .preview-note { margin: 6px 0 0; }
 .type-counts { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
 .type-counts li { padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .type-counts strong { display: inline-block; min-width: 1.6em; text-align: right; }
+.job-panel { margin: 0 0 10px; padding: 12px 14px; border: 1px solid #8299cd; border-radius: 12px; background: #edf2ff; }
+.job-panel[hidden] { display: none; }
+.job-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.job-head strong { flex: 1 1 auto; color: var(--navy); }
+.job-head .btn { padding: 5px 12px; }
+.job-panel progress { display: block; width: 100%; height: 14px; accent-color: var(--brand); }
+.job-note { margin: 6px 0 0; font-size: 12px; }
+.page-type { width: auto; min-height: 38px; padding: 4px 8px; flex: 0 1 190px; }
+.yield-table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.yield-table th, .yield-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+.yield-table th:first-child, .yield-table td:first-child { text-align: left; }
+.yield-table thead th { font-size: 12px; color: var(--muted); }
+.yield-table .yield-total th, .yield-table .yield-total td { border-top: 2px solid var(--line); font-weight: 800; color: var(--navy); }
+.yield-table tfoot th { text-align: left; }
 .page-trim { margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; background: #fbfcfe; }
 .page-trim > summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
 .page-trim[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 6px; }
@@ -217,6 +237,9 @@ body.wide .messages { margin: 0 0 6px; }
 .preview-image-wrap { min-height: 320px; }
 .preview-grid img { max-height: calc(100vh - 150px); }
 .preview.zoomed .preview-image-wrap { max-height: calc(100vh - 150px); }
+@media (max-width: 1350px) {
+  .preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 1000px) {
   .workspace, .workspace.toolbox-right { grid-template-columns: minmax(0, 1fr); }
   .workspace .stage, .workspace.toolbox-right .stage { grid-column: 1; grid-row: 1; }

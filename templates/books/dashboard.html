@@ -12,6 +12,19 @@
   <div class="summary-item"><span class="summary-number">{{ summary.ready_count }}</span><span class="summary-label">PDF consultable(s)</span></div>
 </section>
 {% endif %}
+<section class="card">
+  <h2>💰 Tarifs globaux</h2>
+  <p>Ces tarifs s’appliquent à tous les livres et servent au calcul de leur rendement estimé.</p>
+  <form method="post" action="{% url 'dashboard' %}">
+    {% csrf_token %}
+    {% include "books/_field.html" with field=price_form.price_text %}
+    {% include "books/_field.html" with field=price_form.price_table %}
+    {% include "books/_field.html" with field=price_form.price_chart %}
+    {% include "books/_field.html" with field=price_form.price_photo %}
+    {% include "books/_field.html" with field=price_form.currency %}
+    <button class="btn" type="submit">Enregistrer les tarifs</button>
+  </form>
+</section>
 {% if books %}
 <div class="grid">
 {% for book in books %}
@@ -19,7 +32,8 @@
     <div class="row between"><span class="status {{ book.status }}">{{ book.get_status_display }}</span><span class="muted">{{ book.created_at|date:"d/m/Y" }}</span></div>
     <h2 class="book-card-title">{{ book.title }}</h2>
     <p>{{ book.page_count }} page(s) importée(s)</p>
-    <div class="book-meta">
+    {% if book.yield_info.total %}<p class="muted">Rendement estimé : <strong>{{ book.yield_info.total|floatformat:"2" }} {{ book.currency }}</strong>{% if book.yield_info.unanalysed %} (pages non analysées exclues){% endif %}</p>{% endif %}
+<div class="book-meta">
       <span class="muted">Modifié le {{ book.updated_at|date:"d/m/Y" }}</span>
       {% if book.status == "done" %}<span class="muted">PDF consultable disponible</span>{% elif book.status == "error" %}<span class="error-text">Une vérification est nécessaire</span>{% elif book.status == "new" %}<span class="muted">{% if book.page_count %}Prêt pour les réglages{% else %}Importez des pages pour commencer{% endif %}</span>{% endif %}
     </div>

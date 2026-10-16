@@ -1,5 +1,7 @@
+import base64
 import io
 import json
+import logging
 from pathlib import Path
 import tempfile
 from django.contrib import messages
@@ -8,18 +10,25 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from PIL import Image, ImageOps
-from .classify import CHART, PHOTO, TEXT, classify_page
-from .image_processing import crop_to_page, process_image, same_side_neighbours, sibling_quad
+from .classify import CHART, PHOTO, TABLE, TEXT, TYPES, classify_page
+from .image_processing import (
+    apply_page_layout, crop_to_page, prepare_page_image, process_image, same_side_neighbours,
+    sibling_quad,
+)
 from django.utils.text import get_valid_filename
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
-from .forms import BookCreateForm, ProcessingSettingsForm
-from .models import Book, PageImage
+from . import jobs
+from .forms import BookCreateForm, PriceSettingsForm, ProcessingSettingsForm
+from .llm import OllamaRecommendationError, recommend_page_settings
+from .models import Book, PageImage, PriceSettings
 from .ocr import build_searchable_pdf, OCRProcessingError
+from .text_layers import TextLayerError, separate_text_background
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 MAX_FILES_PER_UPLOAD = 500
 MAX_FILE_SIZE = 30 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 @login_required
 def media_file(request, path):
@@ -35,10 +44,22 @@ def media_file(request, path):
 
 @login_required
 def dashboard(request):
+    prices = PriceSettings.load()
+    if request.method == "POST":
+        price_form = PriceSettingsForm(request.POST, instance=prices)
+        if price_form.is_valid():
+            price_form.save()
+            messages.success(request, "Tarifs globaux enregistrés.")
+            return redirect("dashboard")
+    else:
+        price_form = PriceSettingsForm(instance=prices)
     books = list(
         Book.objects.filter(owner=request.user)
         .annotate(page_count=Count("pages"))
+        .prefetch_related("pages")
     )
+    for book in books:
+        book.yield_info = book.yield_summary()
     summary = Book.objects.filter(owner=request.user).aggregate(
         book_count=Count("pk", distinct=True),
         page_count=Count("pages"),
@@ -47,6 +68,8 @@ def dashboard(request):
     return render(request, "books/dashboard.html", {
         "books": books,
         "summary": summary,
+        "price_form": price_form,
+        "prices": prices,
     })
 
 @login_required
@@ -56,6 +79,9 @@ def create_book(request):
         if form.is_valid():
             book = form.save(commit=False)
             book.owner = request.user
+            prices = PriceSettings.load()
+            for field in ("price_text", "price_table", "price_chart", "price_photo", "currency"):
+                setattr(book, field, getattr(prices, field))
             book.save()
             messages.success(request, "Livre créé. Vous pouvez maintenant importer les pages.")
             return redirect("book_detail", pk=book.pk)
@@ -65,7 +91,10 @@ def create_book(request):
 
 @login_required
 def book_detail(request, pk):
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    # What the last background job left to say (done, cancelled, failed) is shown once.
+    for level, text in jobs.take_result(book):
+        getattr(messages, level if level in ("success", "warning", "error") else "info")(request, text)
     settings_form = ProcessingSettingsForm(instance=book)
     pages = list(book.pages.all())
     preview_pages = {str(p.pk): p.image.url for p in pages}
@@ -76,16 +105,36 @@ def book_detail(request, pk):
         "edge_trimmed": any((book.edge_trim_left, book.edge_trim_top, book.edge_trim_right, book.edge_trim_bottom)),
         "type_counts": {
             "text": sum(1 for p in pages if p.page_type == TEXT),
+            "table": sum(1 for p in pages if p.page_type == TABLE),
             "chart": sum(1 for p in pages if p.page_type == CHART),
             "photo": sum(1 for p in pages if p.page_type == PHOTO),
             "unknown": sum(1 for p in pages if not p.page_type),
         },
+        "yield": book.yield_summary(),
+        "job": jobs.state(book),
     })
+
+def _refuse_while_busy(request, book, what):
+    """Messages and a redirect when a background job is using the book, else None."""
+    if book.job_kind:
+        messages.error(request, f"Un traitement est en cours sur ce livre : {what} après sa fin ou son annulation.")
+        return redirect("book_detail", pk=book.pk)
+    return None
+
+
+def _refuse_json_while_busy(book):
+    if book.job_kind:
+        return JsonResponse({"error": "Un traitement est en cours sur ce livre."}, status=409)
+    return None
+
 
 @login_required
 @require_POST
 def upload_pages(request, pk):
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_while_busy(request, book, "importez les pages")
+    if busy:
+        return busy
     uploads = request.FILES.getlist("images")
     if not uploads:
         messages.error(request, "Sélectionnez au moins une image.")
@@ -149,21 +198,55 @@ def preview_page(request, pk, page_pk):
         except ValueError:
             size = 1000
         neighbours = same_side_neighbours(list(book.pages.all()), page) if draft.auto_crop_page else None
-        image = process_image(Path(page.image.path), draft, max_side=size, extra_rotation=page.rotation,
-                              fallback_sources=neighbours, photo_page=page.has_photo, page_trim=page.custom_trim)
+        adjusted, base_side = prepare_page_image(
+            Path(page.image.path), draft, max_side=size, extra_rotation=page.rotation,
+            fallback_sources=neighbours, photo_page=page.has_photo, page_trim=page.custom_trim,
+        )
+        rendered = apply_page_layout(adjusted.copy(), draft, max_side=size, base_side=base_side)
+        previews = {}
+        for name, image in (("adjusted", adjusted), ("rendered", rendered)):
+            buffer = io.BytesIO()
+            image.save(buffer, "JPEG", quality=85)
+            previews[name] = f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+        if request.GET.get("layers") == "1":
+            text, background, overlay = separate_text_background(adjusted)
+            for name, layer, image_format in (
+                ("text", text, "PNG"),
+                ("background", background, "JPEG"),
+                ("overlay", overlay, "JPEG"),
+            ):
+                buffer = io.BytesIO()
+                layer.save(buffer, image_format, **({"quality": 85} if image_format == "JPEG" else {}))
+                mime_type = "image/png" if image_format == "PNG" else "image/jpeg"
+                previews[name] = f"data:{mime_type};base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+    except TextLayerError as exc:
+        return JsonResponse({"error": str(exc)}, status=exc.status_code)
     except Exception:
+        logger.exception("Preview generation failed for book %s page %s", pk, page_pk)
         return HttpResponse("Impossible de générer l’aperçu.", status=500)
-    buffer = io.BytesIO()
-    image.save(buffer, "JPEG", quality=85)
-    response = HttpResponse(buffer.getvalue(), content_type="image/jpeg")
+    response = JsonResponse(previews)
     response["Cache-Control"] = "no-store"
     return response
 
 @login_required
 @require_POST
+def recommend_settings(request, pk, page_pk):
+    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    page = get_object_or_404(PageImage, pk=page_pk, book=book)
+    try:
+        recommendation = recommend_page_settings(page)
+    except OllamaRecommendationError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+    return JsonResponse(recommendation)
+
+@login_required
+@require_POST
 def rotate_page(request, pk, page_pk):
     """Turn one page by 90 degrees, on top of the automatic rotation."""
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_json_while_busy(book)
+    if busy:
+        return busy
     page = get_object_or_404(PageImage, pk=page_pk, book=book)
     step = -90 if request.POST.get("direction") == "ccw" else 90
     page.rotation = (page.rotation + step) % 360
@@ -173,42 +256,58 @@ def rotate_page(request, pk, page_pk):
 @login_required
 @require_POST
 def analyze_pages(request, pk):
-    """Detect the type of every page (text, graph/curve, image) and count them."""
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
-    pages = list(book.pages.all())
-    if not pages:
+    """Start the analysis of every page (text, table, chart, image) in the background."""
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_while_busy(request, book, "relancez l’analyse")
+    if busy:
+        return busy
+    if not book.pages.exists():
         messages.error(request, "Importez des pages avant de lancer l’analyse.")
         return redirect("book_detail", pk=pk)
-    counts = {TEXT: 0, CHART: 0, PHOTO: 0}
-    failed = 0
-    for page in pages:
-        try:
-            with Image.open(page.image.path) as original:
-                original.draft("RGB", (2000, 2000))   # fast partial decode: enough to tell page types apart
-                photo = ImageOps.exif_transpose(original).convert("RGB")
-            if book.auto_crop_page:
-                neighbours = same_side_neighbours(pages, page)
-                photo = crop_to_page(photo, lambda: sibling_quad(neighbours))
-            kind, _ = classify_page(photo)
-        except Exception:
-            failed += 1
-            continue
-        counts[kind] += 1
-        page.page_type = kind
-        page.has_photo = kind == PHOTO     # image pages use the photo settings; change it per page if needed
-        page.save(update_fields=["page_type", "has_photo"])
-    messages.success(request, (
-        f"Analyse terminée : {counts[TEXT]} page(s) de texte, {counts[CHART]} page(s) avec graphique ou courbe, "
-        f"{counts[PHOTO]} page(s) avec image."))
-    if failed:
-        messages.warning(request, f"{failed} page(s) n’ont pas pu être analysées.")
+    try:
+        jobs.start(book.pk, jobs.ANALYZE)
+    except jobs.JobAlreadyRunning:
+        messages.error(request, "Un traitement est déjà en cours sur ce livre.")
+    else:
+        messages.info(request, "Analyse lancée en arrière-plan : vous pouvez suivre son avancement ici.")
     return redirect("book_detail", pk=pk)
+
+@login_required
+def job_progress(request, pk):
+    """Progress of the background job of a book, polled by the page."""
+    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    return JsonResponse(jobs.state(book))
+
+@login_required
+@require_POST
+def cancel_job(request, pk):
+    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    jobs.cancel(book.pk)
+    return JsonResponse(jobs.state(Book.objects.get(pk=book.pk)))
+@login_required
+@require_POST
+def set_page_type(request, pk, page_pk):
+    """Correct the type the analysis gave to a page ("" = not analysed). Prices follow the type."""
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_json_while_busy(book)
+    if busy:
+        return busy
+    page = get_object_or_404(PageImage, pk=page_pk, book=book)
+    kind = request.POST.get("type", "")
+    if kind and kind not in TYPES:
+        return JsonResponse({"error": "Type inconnu."}, status=400)
+    page.page_type = kind
+    page.save(update_fields=["page_type"])
+    return JsonResponse({"type": page.page_type, "icon": page.type_icon})
 
 @login_required
 @require_POST
 def set_page_trim(request, pk, page_pk):
     """Give one page its own edge trim (or hand it back to the book's trim)."""
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_json_while_busy(book)
+    if busy:
+        return busy
     page = get_object_or_404(PageImage, pk=page_pk, book=book)
 
     def percent(name):
@@ -228,7 +327,10 @@ def set_page_trim(request, pk, page_pk):
 @require_POST
 def toggle_photo(request, pk, page_pk):
     """Mark or unmark a page as 'with photo' (it then uses the photo rendering settings)."""
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_json_while_busy(book)
+    if busy:
+        return busy
     page = get_object_or_404(PageImage, pk=page_pk, book=book)
     page.has_photo = request.POST.get("value") == "1"
     page.save(update_fields=["has_photo"])
@@ -237,7 +339,10 @@ def toggle_photo(request, pk, page_pk):
 @login_required
 @require_POST
 def save_settings(request, pk):
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_while_busy(request, book, "enregistrez les réglages")
+    if busy:
+        return busy
     form = ProcessingSettingsForm(request.POST, instance=book)
     if form.is_valid():
         form.save()
@@ -249,43 +354,26 @@ def save_settings(request, pk):
 @login_required
 @require_POST
 def process_book(request, pk):
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    """Save the settings shown on the page, then build the searchable PDF in the background."""
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_while_busy(request, book, "relancez le traitement")
+    if busy:
+        return busy
     form = ProcessingSettingsForm(request.POST, instance=book)
     if not form.is_valid():
         messages.error(request, "Paramètres de traitement invalides.")
         return redirect("book_detail", pk=pk)
     form.save()
-    pages = list(book.pages.all())
-    if not pages:
+    if not book.pages.exists():
         messages.error(request, "Importez les pages avant de lancer l’OCR.")
         return redirect("book_detail", pk=pk)
-
-    book.status = "processing"
-    book.error_message = ""
-    book.save(update_fields=["status", "error_message", "updated_at"])
     try:
-        with tempfile.TemporaryDirectory(prefix="livreocr_export_") as tmp:
-            output = Path(tmp) / "livre_recherchable.pdf"
-            toc = build_searchable_pdf(book, pages, output)
-            with output.open("rb") as pdf_file:
-                filename = f"livre_{book.pk}_recherchable.pdf"
-                book.output_pdf.save(filename, pdf_file, save=False)
-            book.status = "done"
-            book.save()
-        messages.success(request, "PDF consultable créé avec succès.")
-        if toc.get("links"):
-            messages.success(request, (
-                f"Table des matières : {toc['links']} lien(s) cliquable(s) sur {toc['toc_pages']} page(s)"
-                + (f" ; {toc['unresolved']} entrée(s) renvoient à des pages absentes du livre et n’ont pas de lien." if toc["unresolved"] else ".")))
-        elif toc.get("toc_pages"):
-            messages.warning(request, "Une table des matières a été repérée, mais aucune de ses entrées ne renvoie à une page importée.")
-    except Exception as exc:
-        book.status = "error"
-        book.error_message = str(exc)[:6000]
-        book.save(update_fields=["status", "error_message", "updated_at"])
-        messages.error(request, "Le traitement a échoué. Consultez le détail de l’erreur.")
+        jobs.start(book.pk, jobs.PROCESS)
+    except jobs.JobAlreadyRunning:
+        messages.error(request, "Un traitement est déjà en cours sur ce livre.")
+    else:
+        messages.info(request, "Traitement lancé en arrière-plan : vous pouvez quitter cette page, le PDF sera prêt à la fin.")
     return redirect("book_detail", pk=pk)
-
 @login_required
 def download_pdf(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
@@ -296,7 +384,10 @@ def download_pdf(request, pk):
 @login_required
 @require_POST
 def delete_book(request, pk):
-    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    book = jobs.recover_if_stale(get_object_or_404(Book, pk=pk, owner=request.user))
+    busy = _refuse_while_busy(request, book, "supprimez le livre")
+    if busy:
+        return busy
     book.delete()
     messages.success(request, "Livre supprimé.")
     return redirect("dashboard")

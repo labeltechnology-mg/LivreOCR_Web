@@ -24,6 +24,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+COPY requirements-paddle.txt .
+RUN pip install -r requirements-paddle.txt
+
 COPY --chown=app:app . .
 
 # Uploaded scans and generated PDFs live here: mount a volume on it to keep them.
@@ -39,5 +42,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import socket; socket.create_connection(('127.0.0.1', 8000), 3).close()"
 
-# OCR runs inside the request, so the timeout is generous: raise it for very large books.
+# OCR runs in a background thread; this timeout applies to HTTP requests, not job duration.
 CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${WEB_CONCURRENCY:-2} --timeout ${GUNICORN_TIMEOUT:-900}"]

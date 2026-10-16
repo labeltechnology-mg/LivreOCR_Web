@@ -19,6 +19,7 @@
           <option value="quality">Qualité nette (CLAHE 1,45 · lissage · bruit · netteté 1,22)</option>
           <option value="clean">Livre propre (net, fond blanc)</option>
           <option value="old">Livre ancien / papier jauni</option>
+          <option value="yellow">Papier jaune neutralisé, couleurs conservées</option>
           <option value="photo">Photo téléphone (ombres)</option>
           <option value="text">Texte seul, noir et blanc</option>
         </select>
@@ -36,40 +37,83 @@
         </details>
         <details class="tool-group" open>
           <summary>🎨 Rendu des pages de texte</summary>
-          {% include "books/_field.html" with field=settings_form.lift_colored_pages %}
-          {% include "books/_field.html" with field=settings_form.output_mode %}
-          {% include "books/_field.html" with field=settings_form.brightness %}
-          {% include "books/_field.html" with field=settings_form.contrast %}
-          {% include "books/_field.html" with field=settings_form.clahe %}
-          {% include "books/_field.html" with field=settings_form.background_clean %}
-          {% include "books/_field.html" with field=settings_form.show_through %}
-          {% include "books/_field.html" with field=settings_form.denoise_mode %}
-          {% include "books/_field.html" with field=settings_form.unsharp %}
+          <p class="muted settings-note">Les modifications apparaissent dans l’aperçu. La luminosité, le contraste et le mode de rendu s’appliquent à toute la page ; les réglages ci-dessous sont regroupés par effet.</p>
+          <section class="settings-subgroup" aria-labelledby="text-paper-heading">
+            <h3 id="text-paper-heading">Fond et papier</h3>
+            {% include "books/_field.html" with field=settings_form.lift_colored_pages %}
+            {% include "books/_field.html" with field=settings_form.neutralize_yellow_background %}
+            {% include "books/_field.html" with field=settings_form.background_clean %}
+            {% include "books/_field.html" with field=settings_form.show_through %}
+          </section>
+          <section class="settings-subgroup" aria-labelledby="text-common-heading">
+            <h3 id="text-common-heading">Réglages communs</h3>
+            {% include "books/_field.html" with field=settings_form.output_mode %}
+            {% include "books/_field.html" with field=settings_form.brightness %}
+          </section>
+          <section class="settings-subgroup" aria-labelledby="text-detail-heading">
+            <h3 id="text-detail-heading">Texte et détails</h3>
+            {% include "books/_field.html" with field=settings_form.contrast %}
+            {% include "books/_field.html" with field=settings_form.clahe %}
+            {% include "books/_field.html" with field=settings_form.denoise_mode %}
+            {% include "books/_field.html" with field=settings_form.unsharp %}
+          </section>
         </details>
         {% if pages %}
         <details class="tool-group" open>
           <summary>🔍 Analyse des pages</summary>
           <ul class="type-counts" aria-label="Pages par type">
-            <li>📄 <strong>{{ type_counts.text }}</strong> texte</li>
-            <li>📈 <strong>{{ type_counts.chart }}</strong> graphique / courbe</li>
-            <li>🖼 <strong>{{ type_counts.photo }}</strong> image</li>
-            {% if type_counts.unknown %}<li class="muted">❔ <strong>{{ type_counts.unknown }}</strong> non analysée{{ type_counts.unknown|pluralize }}</li>{% endif %}
+            <li>📄 <strong data-count="text">{{ type_counts.text }}</strong> texte seulement</li>
+            <li>▦ <strong data-count="table">{{ type_counts.table }}</strong> avec tableau</li>
+            <li>📈 <strong data-count="chart">{{ type_counts.chart }}</strong> avec graphique / courbe</li>
+            <li>🖼 <strong data-count="photo">{{ type_counts.photo }}</strong> avec image</li>
+            <li class="muted">❔ <strong data-count="unknown">{{ type_counts.unknown }}</strong> non analysée(s)</li>
           </ul>
-          <p class="muted">L’analyse repère le type de chaque page et marque 📷 les pages image, qui prennent alors le rendu du groupe « Pages avec photo ». Vous pouvez corriger page par page dans l’aperçu.</p>
-          <button class="btn secondary" type="submit" form="analyze-form">🔍 {% if type_counts.unknown == pages|length %}Analyser les pages{% else %}Relancer l’analyse{% endif %}</button>
+          <p class="muted">L’analyse repère le type de chaque page et marque 📷 les pages avec image, qui prennent alors le rendu du groupe « Pages avec photo ». Le type de chaque page se corrige dans l’aperçu ; les prix en dépendent.</p>
+          <button class="btn secondary" type="submit" form="analyze-form"{% if job.active %} disabled title="Un traitement est en cours"{% endif %}>🔍{% if type_counts.unknown == pages|length %}Analyser les pages{% else %}Relancer l’analyse{% endif %}</button>
         </details>
         {% endif %}
+        <details class="tool-group yield-group" open>
+          <summary>💰 Prix et rendement</summary>
+          <p class="muted">Définissez les tarifs de ce livre. Le rendement est calculé automatiquement d’après l’analyse des pages. Les tarifs de l’accueil sont copiés à la création du livre.</p>
+          {% include "books/_field.html" with field=settings_form.price_text %}
+          {% include "books/_field.html" with field=settings_form.price_table %}
+          {% include "books/_field.html" with field=settings_form.price_chart %}
+          {% include "books/_field.html" with field=settings_form.price_photo %}
+          {% include "books/_field.html" with field=settings_form.currency %}
+          <table class="yield-table" id="yield-table" aria-label="Rendement du livre">
+            <thead><tr><th>Type</th><th>Pages</th><th>Prix</th><th>Total</th></tr></thead>
+            <tbody>
+              {% for row in yield.rows %}
+              <tr data-type="{{ row.type }}"><td>{{ row.label }}</td><td data-yield-count>{{ row.count }}</td><td data-yield-price>{{ row.price|floatformat:"2" }}</td><td data-yield-subtotal>{{ row.subtotal|floatformat:"2" }}</td></tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr class="yield-total"><th colspan="3">Rendement total</th><td id="yield-total">{{ yield.total|floatformat:"2" }} {{ book.currency }}</td></tr>
+              <tr><td colspan="3">Moyenne par page analysée</td><td id="yield-average">{{ yield.average|floatformat:"2" }} {{ book.currency }}</td></tr>
+            </tfoot>
+          </table>
+          <p class="muted" id="yield-note">{% if yield.unanalysed %}{{ yield.unanalysed }} page(s) non analysée(s), non comptée(s). Lancez l’analyse pour un total complet.{% elif not yield.pages %}Importez des pages pour calculer le rendement.{% endif %}</p>
+        </details>
         <details class="tool-group photo-group" {% if photo_count %}open{% endif %}>
           <summary>📷 Pages avec photo{% if photo_count %} ({{ photo_count }}){% endif %}</summary>
           <p class="muted">Rendu à part pour les pages marquées « 📷 Page avec photo » dans l’aperçu. Les autres pages gardent le rendu ci-dessus.</p>
-          {% include "books/_field.html" with field=settings_form.photo_output_mode %}
-          {% include "books/_field.html" with field=settings_form.photo_brightness %}
-          {% include "books/_field.html" with field=settings_form.photo_contrast %}
-          {% include "books/_field.html" with field=settings_form.photo_clahe %}
-          {% include "books/_field.html" with field=settings_form.photo_background_clean %}
-          {% include "books/_field.html" with field=settings_form.photo_show_through %}
-          {% include "books/_field.html" with field=settings_form.photo_denoise_mode %}
-          {% include "books/_field.html" with field=settings_form.photo_unsharp %}
+          <section class="settings-subgroup" aria-labelledby="photo-paper-heading">
+            <h3 id="photo-paper-heading">Fond et éclaircissement</h3>
+            {% include "books/_field.html" with field=settings_form.photo_background_clean %}
+            {% include "books/_field.html" with field=settings_form.photo_show_through %}
+            {% include "books/_field.html" with field=settings_form.photo_brightness %}
+          </section>
+          <section class="settings-subgroup" aria-labelledby="photo-detail-heading">
+            <h3 id="photo-detail-heading">Texte et détails</h3>
+            {% include "books/_field.html" with field=settings_form.photo_contrast %}
+            {% include "books/_field.html" with field=settings_form.photo_clahe %}
+            {% include "books/_field.html" with field=settings_form.photo_denoise_mode %}
+            {% include "books/_field.html" with field=settings_form.photo_unsharp %}
+          </section>
+          <section class="settings-subgroup" aria-labelledby="photo-output-heading">
+            <h3 id="photo-output-heading">Rendu global</h3>
+            {% include "books/_field.html" with field=settings_form.photo_output_mode %}
+          </section>
         </details>
         <details class="tool-group" {% if edge_trimmed %}open{% endif %}>
           <summary>🔲 Rogner les bords de la page</summary>
@@ -112,13 +156,13 @@
     </div>
 
     <div class="toolbox-foot">
-      <button class="btn secondary" type="submit" form="settings-form">💾 Enregistrer les réglages</button>
+      <button class="btn secondary" type="submit" form="settings-form"{% if job.active %} disabled title="Un traitement est en cours"{% endif %}>💾 Enregistrer les réglages</button>
       {% if pages %}
       <form id="analyze-form" method="post" action="{% url 'analyze_pages' book.pk %}" hidden>{% csrf_token %}</form>
       <form id="process-form" method="post" action="{% url 'process_book' book.pk %}">
         {% csrf_token %}
         {% for field in settings_form %}{{ field.as_hidden }}{% endfor %}
-        <button id="process-submit" class="btn" type="submit">🚀 Lancer l’OCR</button>
+        <button id="process-submit" class="btn" type="submit"{% if job.active %} disabled title="Un traitement est en cours"{% endif %}>🚀 Lancer l’OCR</button>
       </form>
       {% endif %}
     </div>
@@ -138,6 +182,17 @@
       {% if book.status == "processing" %}Traitement OCR en cours, cela peut prendre quelques minutes.{% elif book.status == "done" %}Traitement terminé : votre PDF consultable est disponible.{% elif book.status == "error" %}Le traitement a échoué. Consultez le détail ci-dessous, puis réessayez.{% elif pages %}Réglez le rendu dans la boîte à outils, vérifiez l’aperçu, puis lancez l’OCR.{% else %}Commencez par importer les images de votre livre.{% endif %}
     </p>
 
+    <div class="job-panel" id="job-panel" role="status" aria-live="polite" data-url="{% url 'job_progress' book.pk %}" data-cancel-url="{% url 'cancel_job' book.pk %}"{% if not job.active %} hidden{% endif %}>
+      <div class="job-head">
+        <strong id="job-title">{{ job.title }}</strong>
+        <span id="job-percent">{{ job.percent|floatformat:"0" }} %</span>
+        <button class="btn danger" id="job-cancel" type="button"{% if job.cancelling %} disabled{% endif %}>Annuler</button>
+      </div>
+      <progress id="job-bar" max="100" value="{{ job.percent|stringformat:'g' }}"></progress>
+      <div class="muted" id="job-step">{{ job.step }}</div>
+      <p class="muted job-note">Le traitement continue même si vous quittez cette page.</p>
+    </div>
+
     {% if book.status == "error" and book.error_message %}
     <div class="card error-panel">
       <h2 class="error-heading">Détail de l’erreur</h2><pre class="error-detail">{{ book.error_message }}</pre>
@@ -145,19 +200,26 @@
     {% endif %}
 
     {% if pages %}
-    <div class="preview" id="preview" data-url-template="{% url 'preview_page' book.pk 0 %}" aria-busy="true">
+    <div class="preview" id="preview" data-url-template="{% url 'preview_page' book.pk 0 %}" data-ai-url-template="{% url 'recommend_settings' book.pk 0 %}" aria-busy="true">
       <div class="preview-bar">
         <button class="btn secondary" id="preview-previous" type="button" aria-label="Afficher la page précédente">←</button>
         <select id="preview-page" aria-label="Sélectionner la page à prévisualiser">
-          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}" data-trim-custom="{% if page.trim_custom %}1{% else %}0{% endif %}" data-trim-left="{{ page.trim_left|stringformat:'g' }}" data-trim-top="{{ page.trim_top|stringformat:'g' }}" data-trim-right="{{ page.trim_right|stringformat:'g' }}" data-trim-bottom="{{ page.trim_bottom|stringformat:'g' }}">{% if page.type_icon %}{{ page.type_icon }} {% endif %}{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}{% if page.trim_custom %} ✂{% endif %}</option>{% endfor %}
+          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}" data-type="{{ page.page_type }}" data-trim-custom="{% if page.trim_custom %}1{% else %}0{% endif %}" data-trim-left="{{ page.trim_left|stringformat:'g' }}" data-trim-top="{{ page.trim_top|stringformat:'g' }}" data-trim-right="{{ page.trim_right|stringformat:'g' }}" data-trim-bottom="{{ page.trim_bottom|stringformat:'g' }}">{% if page.type_icon %}{{ page.type_icon }} {% endif %}{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}{% if page.trim_custom %} ✂{% endif %}</option>{% endfor %}
         </select>
         <button class="btn secondary" id="preview-next" type="button" aria-label="Afficher la page suivante">→</button>
+        <select id="page-type" class="page-type" aria-label="Type de cette page (sert au calcul du rendement)" title="Type de cette page : sert au calcul du rendement"{% if job.active %} disabled{% endif %}>
+          <option value="">❔ Non analysée</option>
+          <option value="text">📄 Texte seulement</option>
+          <option value="table">▦ Avec tableau</option>
+          <option value="chart">📈 Avec graphique / courbe</option>
+          <option value="photo">🖼 Avec image</option>
+        </select>
         <label class="photo-toggle" title="Cette page contient une photo : elle utilise les réglages du groupe « Pages avec photo »">
-          <input type="checkbox" id="photo-toggle"> 📷 Page avec photo
+          <input type="checkbox" id="photo-toggle"{% if job.active %} disabled{% endif %}> 📷 Page avec photo
         </label>
         <span class="rotate-group" role="group" aria-label="Pivoter cette page">
-          <button class="btn secondary" id="rotate-ccw" type="button" title="Pivoter à gauche" aria-label="Pivoter la page de 90° vers la gauche">↺</button>
-          <button class="btn secondary" id="rotate-cw" type="button" title="Pivoter à droite" aria-label="Pivoter la page de 90° vers la droite">↻</button>
+          <button class="btn secondary" id="rotate-ccw" type="button" title="Pivoter à gauche" aria-label="Pivoter la page de 90° vers la gauche"{% if job.active %} disabled{% endif %}>↺</button>
+          <button class="btn secondary" id="rotate-cw" type="button" title="Pivoter à droite" aria-label="Pivoter la page de 90° vers la droite"{% if job.active %} disabled{% endif %}>↻</button>
         </span>
         <div class="zoom-controls" role="group" aria-label="Zoom de l’aperçu">
           <button class="btn secondary" id="zoom-out" type="button" aria-label="Réduire le zoom">−</button>
@@ -169,17 +231,29 @@
       </div>
       <details class="page-trim" id="page-trim">
         <summary>✂ Rognage de cette page <span class="muted" id="page-trim-state"></span></summary>
-        <label class="page-trim-custom"><input type="checkbox" id="page-trim-custom"> Rognage propre à cette page (sinon : celui du livre)</label>
+        <label class="page-trim-custom"><input type="checkbox" id="page-trim-custom"{% if job.active %} disabled{% endif %}> Rognage propre à cette page (sinon : celui du livre)</label>
         <div class="page-trim-grid">
-          <label>Haut <output id="page-trim-top-out">0</output> %<input type="range" id="page-trim-top" min="0" max="25" step="0.5" value="0"></label>
-          <label>Bas <output id="page-trim-bottom-out">0</output> %<input type="range" id="page-trim-bottom" min="0" max="25" step="0.5" value="0"></label>
-          <label>Gauche <output id="page-trim-left-out">0</output> %<input type="range" id="page-trim-left" min="0" max="25" step="0.5" value="0"></label>
-          <label>Droite <output id="page-trim-right-out">0</output> %<input type="range" id="page-trim-right" min="0" max="25" step="0.5" value="0"></label>
+          <label>Haut <output id="page-trim-top-out">0</output> %<input type="range" id="page-trim-top" min="0" max="25" step="0.5" value="0"{% if job.active %} disabled{% endif %}></label>
+          <label>Bas <output id="page-trim-bottom-out">0</output> %<input type="range" id="page-trim-bottom" min="0" max="25" step="0.5" value="0"{% if job.active %} disabled{% endif %}></label>
+          <label>Gauche <output id="page-trim-left-out">0</output> %<input type="range" id="page-trim-left" min="0" max="25" step="0.5" value="0"{% if job.active %} disabled{% endif %}></label>
+          <label>Droite <output id="page-trim-right-out">0</output> %<input type="range" id="page-trim-right" min="0" max="25" step="0.5" value="0"{% if job.active %} disabled{% endif %}></label>
         </div>
       </details>
+      <div class="preview-layers" role="group" aria-label="Couches de l’aperçu">
+        <button class="btn secondary" type="button" data-preview-layer="adjusted" aria-pressed="true">Avec réglages</button>
+        <button class="btn secondary" type="button" data-preview-layer="text" aria-pressed="false">Texte seulement</button>
+        <button class="btn secondary" type="button" data-preview-layer="background" aria-pressed="false">Fond seulement</button>
+        <button class="btn secondary" type="button" data-preview-layer="overlay" aria-pressed="false">Superposition</button>
+      </div>
+      <p class="muted preview-note">PaddleOCR extrait le texte et reconstitue le fond à partir de l’image « Avec réglages ». Le rendu final à droite montre la page avec le rognage des marges et la mise en page de sortie. L’extraction est une aide visuelle et ne modifie pas le PDF généré.</p>
       <div class="preview-grid">
-        <figure><figcaption>Original</figcaption><div class="preview-image-wrap"><img id="preview-before" alt="Page originale" src="{{ pages.0.image.url }}"></div></figure>
-        <figure><figcaption>Avec les réglages <span id="preview-state" class="muted" role="status" aria-live="polite">Préparation de l’aperçu…</span></figcaption><div class="preview-image-wrap"><img id="preview-after" alt="Page traitée avec les réglages actuels" hidden><span id="preview-placeholder" class="preview-placeholder">L’aperçu traité apparaîtra ici.</span></div></figure>
+        <figure><figcaption>1. Original</figcaption><div class="preview-image-wrap"><img id="preview-original" alt="Page originale" src="{{ pages.0.image.url }}"></div></figure>
+        <figure><figcaption>2. <span id="preview-layer-label">Avec réglages</span> <span id="preview-state" class="muted" role="status" aria-live="polite">Préparation de l’aperçu…</span></figcaption><div class="preview-image-wrap"><img id="preview-adjusted" alt="Page ajustée, avant mise en page finale" hidden><span id="preview-adjusted-placeholder" class="preview-placeholder">L’aperçu ajusté apparaîtra ici.</span></div></figure>
+        <figure><figcaption>3. Rendu final — mise en page complète</figcaption><div class="preview-image-wrap"><img id="preview-final" alt="Rendu final avec tous les réglages et la mise en page" hidden><span id="preview-final-placeholder" class="preview-placeholder">Le rendu final apparaîtra ici.</span></div></figure>
+      </div>
+      <div class="ai-settings">
+        <button class="btn secondary" id="ai-settings-button" type="button">✨ Proposer des réglages avec l’IA</button>
+        <p class="muted" id="ai-settings-status" role="status" aria-live="polite">L’analyse locale d’une page préremplit les réglages ; vérifiez l’aperçu, puis enregistrez si le résultat vous convient.</p>
       </div>
       <p class="muted preview-note">Rien n’est enregistré tant que vous ne cliquez pas sur « Enregistrer les réglages ». Le redressement figure dans l’aperçu ; seule la rotation automatique (pages à l’envers) est appliquée par l’OCR.</p>
     </div>
@@ -205,14 +279,27 @@
   var box = document.getElementById("preview");
   var form = document.getElementById("settings-form");
   var select = document.getElementById("preview-page");
-  var before = document.getElementById("preview-before");
-  var after = document.getElementById("preview-after");
-  var placeholder = document.getElementById("preview-placeholder");
+  var original = document.getElementById("preview-original");
+  var adjusted = document.getElementById("preview-adjusted");
+  var finalImage = document.getElementById("preview-final");
+  var adjustedPlaceholder = document.getElementById("preview-adjusted-placeholder");
+  var finalPlaceholder = document.getElementById("preview-final-placeholder");
   var state = document.getElementById("preview-state");
+  var layerLabel = document.getElementById("preview-layer-label");
+  var layerButtons = box.querySelectorAll("[data-preview-layer]");
+  var layerNames = {
+    adjusted: "Avec réglages",
+    text: "Texte seulement",
+    background: "Fond seulement",
+    overlay: "Superposition du texte extrait sur le fond"
+  };
+  var activeLayer = "adjusted", previews = {};
   var previous = document.getElementById("preview-previous");
   var next = document.getElementById("preview-next");
   var pages = {{ preview_pages_json|safe }};
   var timer = null, counter = 0;
+  var aiButton = document.getElementById("ai-settings-button");
+  var aiStatus = document.getElementById("ai-settings-status");
 
   function params() {
     var data = new FormData(form);
@@ -231,24 +318,27 @@
     zoomRange.value = value;
     zoomValue.textContent = value + " %";
     box.classList.toggle("zoomed", value > 100);
-    [before, after].forEach(function (img) { img.style.width = value > 100 ? value + "%" : ""; });
+    [original, adjusted, finalImage].forEach(function (img) { img.style.width = value > 100 ? value + "%" : ""; });
     if (previewSize() !== lastSize) refresh();
   }
   zoomRange.addEventListener("input", function () { setZoom(Number(zoomRange.value)); });
   document.getElementById("zoom-in").addEventListener("click", function () { setZoom(Number(zoomRange.value) + 25); });
   document.getElementById("zoom-out").addEventListener("click", function () { setZoom(Number(zoomRange.value) - 25); });
   document.getElementById("zoom-reset").addEventListener("click", function () { setZoom(100); });
-  [before, after].forEach(function (img) {
+  [original, adjusted, finalImage].forEach(function (img) {
     img.addEventListener("dblclick", function () { setZoom(Number(zoomRange.value) > 100 ? 100 : 250); });
   });
-  // Keep both panes aligned so the original and processed page can be compared at the same spot.
+  // Keep all three panes aligned so each processing stage can be compared at the same spot.
   wraps.forEach(function (wrap, i) {
     wrap.addEventListener("scroll", function () {
       if (syncing) return;
       syncing = true;
-      var other = wraps[1 - i];
-      other.scrollLeft = wrap.scrollLeft;
-      other.scrollTop = wrap.scrollTop;
+      wraps.forEach(function (other, j) {
+        if (i !== j) {
+          other.scrollLeft = wrap.scrollLeft;
+          other.scrollTop = wrap.scrollTop;
+        }
+      });
       syncing = false;
     });
   });
@@ -256,33 +346,123 @@
   function refresh() {
     lastSize = previewSize();
     var id = select.value, mine = ++counter;
-    before.src = pages[id];
+    original.src = pages[id];
     box.setAttribute("aria-busy", "true");
     state.textContent = "Mise à jour de l’aperçu…";
     var url = box.dataset.urlTemplate.replace(/0\/$/, id + "/") + "?" + params() + "&size=" + previewSize() + "&t=" + Date.now();   // unique: page-level changes (rotation, trim, photo) leave the settings unchanged, and an identical URL would not refresh the image
-    var img = new Image();
-    img.onload = function () {
-      if (mine !== counter) return;
-      after.src = img.src;
-      after.hidden = false;
-      placeholder.hidden = true;
-      state.textContent = "Aperçu à jour.";
-      box.setAttribute("aria-busy", "false");
-    };
-    img.onerror = function () {
-      if (mine !== counter) return;
-      after.hidden = true;
-      placeholder.hidden = false;
-      placeholder.textContent = "Impossible de créer l’aperçu. Vérifiez les réglages puis réessayez.";
-      state.textContent = "Aperçu indisponible.";
-      box.setAttribute("aria-busy", "false");
-    };
-    img.src = url;
+    var needsLayers = activeLayer !== "adjusted";
+    previews = {};
+    fetch(url + (needsLayers ? "&layers=1" : ""))
+      .then(function (response) {
+        if (!response.ok) {
+          return response.json().then(function (data) {
+            throw new Error(data.error || "Impossible de créer l’aperçu.");
+          }, function () {
+            throw new Error("Impossible de créer l’aperçu.");
+          });
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (mine !== counter) return;
+        previews = data;
+        adjusted.src = previews[activeLayer];
+        adjusted.hidden = false;
+        adjustedPlaceholder.hidden = true;
+        finalImage.src = previews.rendered;
+        finalImage.hidden = false;
+        finalPlaceholder.hidden = true;
+        layerLabel.textContent = layerNames[activeLayer];
+        state.textContent = "Aperçu à jour.";
+        box.setAttribute("aria-busy", "false");
+      }).catch(function (error) {
+        if (mine !== counter) return;
+        adjusted.hidden = true;
+        adjustedPlaceholder.hidden = false;
+        adjustedPlaceholder.textContent = error.message || "Impossible de créer l’aperçu ajusté.";
+        finalImage.hidden = true;
+        finalPlaceholder.hidden = false;
+        finalPlaceholder.textContent = error.message || "Impossible de créer le rendu final.";
+        state.textContent = "Aperçu indisponible.";
+        box.setAttribute("aria-busy", "false");
+      });
   }
+  layerButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      activeLayer = button.dataset.previewLayer;
+      layerButtons.forEach(function (item) {
+        item.setAttribute("aria-pressed", item === button ? "true" : "false");
+      });
+      layerLabel.textContent = layerNames[activeLayer];
+      if (previews[activeLayer]) {
+        adjusted.src = previews[activeLayer];
+      } else {
+        refresh();
+      }
+    });
+  });
   function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 300); }
   form.addEventListener("input", schedule);
   form.addEventListener("change", schedule);
   select.addEventListener("change", refresh);
+  aiButton.addEventListener("click", function () {
+    var analyzedPageId = select.value;
+    var isPhotoPage = select.options[select.selectedIndex].dataset.photo === "1";
+    aiButton.disabled = true;
+    aiStatus.textContent = "Analyse de la page avec le modèle local…";
+    var url = box.dataset.aiUrlTemplate.replace(/0\/$/, analyzedPageId + "/");
+    var body = new URLSearchParams({csrfmiddlewaretoken: csrf});
+    var submittedValues = {};
+    ["language", "lift_colored_pages", "neutralize_yellow_background", "output_mode",
+     "brightness", "contrast", "clahe", "background_clean", "show_through",
+     "denoise_mode", "unsharp"].forEach(function (name) {
+      var fieldName = isPhotoPage && ["output_mode", "brightness", "contrast", "clahe", "background_clean",
+                                      "show_through", "denoise_mode", "unsharp"].indexOf(name) !== -1
+        ? "photo_" + name : name;
+      var field = form.elements[fieldName];
+      if (field) submittedValues[fieldName] = field.type === "checkbox" ? String(field.checked) : field.value;
+    });
+    fetch(url, {method: "POST", headers: {"X-CSRFToken": csrf}, body: body})
+      .then(function (response) {
+        return response.json().then(function (data) {
+          if (!response.ok) throw new Error(data.error || "L’analyse a échoué.");
+          return data;
+        });
+      })
+      .then(function (result) {
+        if (select.value !== analyzedPageId) {
+          throw new Error("La page affichée a changé pendant l’analyse. Relancez la proposition.");
+        }
+        if ((select.options[select.selectedIndex].dataset.photo === "1") !== isPhotoPage) {
+          throw new Error("Le type de la page a changé pendant l’analyse. Relancez la proposition.");
+        }
+        var skippedChanges = false;
+        Object.keys(result.settings).forEach(function (name) {
+          if (isPhotoPage && ["output_mode", "brightness", "contrast", "clahe", "background_clean",
+                              "show_through", "denoise_mode", "unsharp"].indexOf(name) !== -1) {
+            name = "photo_" + name;
+          }
+          var field = form.elements[name];
+          if (!field) return;
+          var currentValue = field.type === "checkbox" ? String(field.checked) : field.value;
+          if (name in submittedValues && currentValue !== submittedValues[name]) {
+            skippedChanges = true;
+            return;
+          }
+          if (field.type === "checkbox") field.checked = result.settings[name];
+          else field.value = result.settings[name];
+          field.dispatchEvent(new Event("input", {bubbles: true}));
+          field.dispatchEvent(new Event("change", {bubbles: true}));
+        });
+        aiStatus.textContent = "Proposition de l’IA : " + result.reason
+          + (skippedChanges ? " Les réglages modifiés pendant l’analyse ont été conservés." : "")
+          + " Les réglages ne sont pas enregistrés.";
+      })
+      .catch(function (error) {
+        aiStatus.textContent = error.message || "Analyse impossible. Vérifiez le serveur Ollama.";
+      })
+      .finally(function () { aiButton.disabled = false; });
+  });
   function movePage(direction) {
     var index = select.selectedIndex + direction;
     if (index < 0) index = select.options.length - 1;
@@ -370,6 +550,52 @@
   select.addEventListener("change", showTrim);
   form.addEventListener("input", function () { if (!trimCustom.checked) showTrim(); });
   showTrim();
+
+  // Type of the page (text / table / chart / image) and the yield computed from it.
+  var typeSelect = document.getElementById("page-type");
+  var typeUrl = box.dataset.urlTemplate.replace("apercu/0/", "pages/ID/type/");
+  var ICONS = {text: "📄", table: "▦", chart: "📈", photo: "🖼", "": ""};
+  var TYPES = ["text", "table", "chart", "photo"];
+  var money = new Intl.NumberFormat("fr-FR", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  function priceOf(type) {
+    var field = form.elements["price_" + type];
+    return field ? (parseFloat(String(field.value).replace(",", ".")) || 0) : 0;
+  }
+  function recount() {
+    var counts = {text: 0, table: 0, chart: 0, photo: 0, unknown: 0};
+    Array.prototype.forEach.call(select.options, function (o) { counts[o.dataset.type || "unknown"] += 1; });
+    document.querySelectorAll("[data-count]").forEach(function (el) { el.textContent = counts[el.dataset.count]; });
+    var currency = form.elements.currency ? form.elements.currency.value : "", total = 0, analysed = 0;
+    TYPES.forEach(function (type) {
+      var row = document.querySelector('#yield-table tr[data-type="' + type + '"]');
+      var subtotal = counts[type] * priceOf(type);
+      total += subtotal; analysed += counts[type];
+      if (!row) return;
+      row.querySelector("[data-yield-count]").textContent = counts[type];
+      row.querySelector("[data-yield-price]").textContent = money.format(priceOf(type));
+      row.querySelector("[data-yield-subtotal]").textContent = money.format(subtotal);
+    });
+    document.getElementById("yield-total").textContent = money.format(total) + " " + currency;
+    document.getElementById("yield-average").textContent = money.format(analysed ? total / analysed : 0) + " " + currency;
+    document.getElementById("yield-note").textContent = counts.unknown
+      ? counts.unknown + " page(s) non analysée(s), non comptée(s). Lancez l’analyse pour un total complet." : "";
+  }
+  function syncType() { typeSelect.value = select.options[select.selectedIndex].dataset.type || ""; }
+  typeSelect.addEventListener("change", function () {
+    var option = select.options[select.selectedIndex], previous = option.dataset.type || "";
+    fetch(typeUrl.replace("ID", select.value), {method: "POST", headers: {"X-CSRFToken": csrf}, body: new URLSearchParams({type: typeSelect.value})})
+      .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+      .then(function (data) {
+        option.dataset.type = data.type;
+        option.textContent = option.textContent.replace(/^(📄|▦|📈|🖼) /, "");
+        if (data.type) option.textContent = ICONS[data.type] + " " + option.textContent;
+        recount();
+      })
+      .catch(function () { typeSelect.value = previous; state.textContent = "Enregistrement du type impossible."; });
+  });
+  select.addEventListener("change", syncType);
+  form.addEventListener("input", function (event) { if (/^(price_|currency)/.test(event.target.name || "")) recount(); });
+  syncType(); recount();
   document.getElementById("rotate-ccw").addEventListener("click", function () { rotatePage("ccw"); });
   document.getElementById("rotate-cw").addEventListener("click", function () { rotatePage("cw"); });
   previous.addEventListener("click", function () { movePage(-1); });
@@ -377,7 +603,7 @@
   refresh();
 
   var presets = {
-    default: {lift_colored_pages: true, edge_trim_left: 0, edge_trim_top: 0, edge_trim_right: 0, edge_trim_bottom: 0, a4_margin_mm: 5, a4_align: "center", toc_links: true, photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
+    default: {lift_colored_pages: true, neutralize_yellow_background: false, edge_trim_left: 0, edge_trim_top: 0, edge_trim_right: 0, edge_trim_bottom: 0, a4_margin_mm: 5, a4_align: "center", toc_links: true, photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
               photo_background_clean: false, photo_show_through: 0, photo_denoise_mode: "off", photo_unsharp: 0.3,
               language: "fra+eng", page_format: "a4", output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: false,
               background_clean: false, show_through: 0, denoise_mode: "off", unsharp: 0, auto_crop_page: true,
@@ -386,6 +612,8 @@
     quality: {clahe: true, denoise_mode: "combined", unsharp: 1.22},
     clean: {output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: true, background_clean: true, show_through: 0.4, denoise_mode: "off", unsharp: 0.5, deskew: true},
     old:   {output_mode: "color", brightness: 1.05, contrast: 1.1, clahe: true, background_clean: true, show_through: 0.6, denoise_mode: "edge", unsharp: 0.7, deskew: true},
+    yellow: {neutralize_yellow_background: true, output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: false,
+             background_clean: false, show_through: 0.3, denoise_mode: "off", unsharp: 0, deskew: true},
     photo: {output_mode: "gray", brightness: 1.0, contrast: 1.0, clahe: true, background_clean: true, show_through: 0.6, denoise_mode: "edge", unsharp: 0.8, deskew: true},
     text:  {output_mode: "bw", brightness: 1.0, contrast: 1.0, clahe: false, background_clean: true, show_through: 0.6, denoise_mode: "median", unsharp: 0.3, deskew: true}
   };
@@ -405,13 +633,12 @@
   processForm.addEventListener("submit", function (event) {
     var processButton = document.getElementById("process-submit");
     if (processForm.dataset.submitting === "true") {
-      event.preventDefault();
+      event.preventDefault();                       // a second click must not start a second job
       return;
     }
     processForm.dataset.submitting = "true";
     processButton.disabled = true;
-    processButton.textContent = "Traitement en cours…";
-    document.getElementById("processing-status").textContent = "Votre demande est envoyée. Le traitement OCR peut prendre quelques minutes ; gardez cette page ouverte.";
+    processButton.textContent = "Lancement…";       // the page comes back at once, with the progress bar
     Array.prototype.forEach.call(form.elements, function (el) {
       if (!el.name || el.name === "csrfmiddlewaretoken") return;
       var hidden = processForm.querySelector('input[type=hidden][name="' + el.name + '"]');
@@ -505,6 +732,41 @@
     document.getElementById("preset").addEventListener("change", function () { setTimeout(show, 0); });
     show();
   });
+})();
+</script>
+<script>
+// Progress of the background job (OCR of the book, analysis of the pages). The page can be left and
+// reopened at any time: the job runs on the server and this only shows where it stands.
+(function () {
+  var panel = document.getElementById("job-panel");
+  if (!panel || panel.hidden) return;
+  var bar = document.getElementById("job-bar"), step = document.getElementById("job-step");
+  var percent = document.getElementById("job-percent"), title = document.getElementById("job-title");
+  var cancel = document.getElementById("job-cancel");
+  var csrfField = document.querySelector("input[name=csrfmiddlewaretoken]");
+  var baseTitle = document.title;
+  function tick() {
+    fetch(panel.dataset.url, {headers: {Accept: "application/json"}, cache: "no-store"})
+      .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+      .then(function (state) {
+        if (!state.active) { window.location.reload(); return; }   // finished: reload shows the result and the PDF
+        title.textContent = state.title;
+        bar.value = state.percent;
+        percent.textContent = Math.round(state.percent) + " %";
+        step.textContent = state.step;
+        cancel.disabled = state.cancelling;
+        document.title = Math.round(state.percent) + " % — " + baseTitle;
+        setTimeout(tick, 1500);
+      })
+      .catch(function () { step.textContent = "Connexion perdue, nouvel essai…"; setTimeout(tick, 4000); });
+  }
+  cancel.addEventListener("click", function () {
+    if (!window.confirm("Annuler le traitement en cours ?")) return;
+    cancel.disabled = true;
+    step.textContent = "Annulation en cours…";
+    fetch(panel.dataset.cancelUrl, {method: "POST", headers: {"X-CSRFToken": csrfField ? csrfField.value : ""}});
+  });
+  setTimeout(tick, 800);
 })();
 </script>
 {% endblock %}

@@ -78,7 +78,9 @@ docker compose exec web python manage.py createsuperuser
 Ouvrez http://localhost:8000/. Les scans et les PDF sont dans le volume `media-data`, la base dans `db-data` : `docker compose down` les conserve, `docker compose down -v` les supprime.
 
 - `DJANGO_HTTPS=0` (valeur du `.env.example`) sert uniquement à tester en http sur localhost. Derrière un reverse proxy HTTPS, mettez `DJANGO_HTTPS=1` et renseignez `DJANGO_ALLOWED_HOSTS` et `DJANGO_CSRF_TRUSTED_ORIGINS` avec votre domaine.
-- L'OCR s'exécute dans la requête : `GUNICORN_TIMEOUT` (900 s par défaut) doit dépasser la durée du plus gros livre.
+- L'OCR et l'analyse des pages s'exécutent en arrière-plan dans un thread du processus web. La page affiche l'avancement et peut être quittée pendant le traitement. L'état et le signal de vie sont enregistrés en base ; si le processus web s'arrête ou redémarre, le traitement est déclaré interrompu après trois minutes sans signal de vie et peut être relancé. Ce mécanisme n'est pas une file de travaux durable : les fichiers média et la base doivent rester accessibles au serveur.
+- L'aperçu compare trois étapes côte à côte : l'image originale, la page ajustée avant mise en page (où PaddleOCR peut afficher le texte seul, le fond seul ou leur superposition), puis le rendu final avec rognage et format de sortie. PaddleOCR fonctionne sur CPU et se charge au premier clic sur une couche. Dans Docker, les dépendances sont installées par l'image ; pour une installation locale Python 3.12, lancez `pip install -r requirements-paddle.txt`. Le premier clic doit pouvoir télécharger le modèle de détection (environ 60 Mo) ; il est ensuite mis en cache par PaddleX. Cette séparation est une aide visuelle, distincte de l'OCR et du PDF, et peut manquer des caractères si le scan est flou ou trop petit.
+- Les réglages assistés par IA utilisent Ollama local, sans envoyer les pages à un service cloud. Installez Ollama et son modèle vision léger `gemma3:4b` avec `ollama pull gemma3:4b`, puis configurez `OLLAMA_BASE_URL`, `OLLAMA_VISION_MODEL` et `OLLAMA_TIMEOUT` dans l’environnement du serveur ou dans `.env` avec Docker Compose. Le chargement initial d’un modèle peut prendre plusieurs minutes ; le délai par défaut est de 600 secondes. Dans Docker Desktop, le serveur web utilise `http://host.docker.internal:11434` ; configurez Ollama sur l’hôte pour accepter les connexions du conteneur et limitez l’accès réseau au besoin. Dans le livre, sélectionnez une page puis cliquez sur « Proposer des réglages avec l’IA » : les réglages et la langue OCR sont proposés dans le formulaire, sans sauvegarde automatique. Les réglages d’image concernent le groupe du livre ou, si la page est marquée comme photo, le groupe « Pages avec photo ». Vérifiez l’aperçu, ajustez si nécessaire, puis enregistrez et lancez l’OCR normalement.
 - Les images de pages et les PDF ne sont servis qu'à leur propriétaire (route `/media/…` authentifiée).
 
 ## Workflow Git
@@ -90,7 +92,7 @@ Ouvrez http://localhost:8000/. Les scans et les PDF sont dans le volume `media-d
 - Tests en local : `python manage.py test`.
 
 ## Limites connues du prototype
-1. Le traitement OCR est synchrone dans la requête HTTP : pour les livres volumineux, ajoutez une file de tâches (Celery/RQ) et un worker.
+1. Le traitement OCR et l’analyse s’exécutent dans le processus web et ne constituent pas une file de tâches durable : pour la haute disponibilité ou plusieurs instances, utilisez une file (Celery/RQ) et un worker.
 2. Les pages sont classées par ordre d’import, pas par détection automatique du contenu ; utilisez des noms séquentiels et contrôlez l’ordre.
 3. Le recadrage automatique par seuil peut couper du contenu de bord ou mal traiter des pages jaunies. Vérifiez les pages avant usage archivistique.
 4. Les images sont privées via les vues applicatives, mais les fichiers média ne doivent pas être servis publiquement sans contrôle d'accès en production.

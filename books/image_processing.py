@@ -275,6 +275,51 @@ def lift_colored_page(image: Image.Image) -> Image.Image:
         return image                                    # already bright enough
     return Image.fromarray(np.clip(np.array(image).astype(np.float32) * gain, 0, 255).astype(np.uint8))
 
+def neutralize_yellow_background(image: Image.Image) -> Image.Image:
+    """Whiten yellowed and stained paper without flattening dark ink or vivid artwork."""
+    rgb = np.array(image.convert("RGB"))
+    red, green, blue = cv2.split(rgb)
+    luminance = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    yellow = ((red > green + 4) & (green > blue + 4) & (red > blue + 12) & (luminance > 60))
+    if yellow.mean() < 0.12:
+        return image
+
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    paper_hue = float(np.median(hsv[:, :, 0][yellow]))
+    paper_saturation = float(np.median(hsv[:, :, 1][yellow]))
+    paper_luminance = float(np.median(luminance[yellow]))
+    hue_distance = np.minimum(
+        np.abs(hsv[:, :, 0].astype(np.float32) - paper_hue),
+        180 - np.abs(hsv[:, :, 0].astype(np.float32) - paper_hue),
+    )
+    paper = (
+        yellow
+        & (hue_distance <= 18)
+        & (hsv[:, :, 1] <= min(150, paper_saturation + 40))
+        & (luminance >= max(60, paper_luminance * 0.5))
+    )
+    hue = hsv[:, :, 0].astype(np.float32)
+    warm_artwork = (hue < paper_hue - 3) & (hsv[:, :, 1] > paper_saturation + 10)
+    paper &= ~warm_artwork
+    if paper.mean() < 0.10:
+        return image
+
+    # Estimate the local paper level so brown ink and its antialiased edges are not mistaken for stains.
+    local_paper = cv2.morphologyEx(
+        luminance, cv2.MORPH_CLOSE,
+        np.ones((_odd(max(luminance.shape) // 30, 15),) * 2, np.uint8),
+    ).astype(np.float32)
+    lum = luminance.astype(np.float32)
+    ink = lum < local_paper * 0.78
+    paper &= ~ink
+
+    ratio = np.clip(lum / max(paper_luminance, 1), 0, 1)
+    whitened = np.clip(255 * np.power(ratio, 0.14), 0, 255).astype(np.uint8)
+    whitened[ratio >= 0.72] = 255
+    result = rgb.copy()
+    result[paper] = whitened[paper, None]
+    return Image.fromarray(result)
+
 def apply_clahe(image: Image.Image) -> Image.Image:
     """Moderate local contrast (CLAHE) on the lightness channel only, so colors stay natural."""
     lab = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2LAB)
@@ -285,6 +330,19 @@ def apply_clahe(image: Image.Image) -> Image.Image:
     keep =np.clip((0.45 - l.astype(np.float32) / paper) / 0.2, 0, 1)
     l = np.clip(keep * l + (1 - keep) * equalized, 0, 255).astype(np.uint8)
     return Image.fromarray(cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2RGB))
+
+def adjust_brightness(image: Image.Image, factor: float) -> Image.Image:
+    """Change lightness with a gamma curve, keeping highlights from clipping to white."""
+    if factor == 1.0:
+        return image
+    if factor <= 0:
+        return Image.new("RGB", image.size, "black")
+    lab = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2LAB)
+    lightness, a, b = cv2.split(lab)
+    normalized = lightness.astype(np.float32) / 255.0
+    adjusted = np.power(normalized, 1.0 / factor) * 255
+    lab = cv2.merge((np.clip(adjusted, 0, 255).astype(np.uint8), a, b))
+    return Image.fromarray(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB))
 
 def reduce_show_through(image: Image.Image, strength: float) -> Image.Image:
     """Fade the text of the other side (verso) that shines through thin paper.
@@ -423,25 +481,17 @@ def same_side_neighbours(pages, page, limit: int = 4) -> list[Path]:
     others.sort(key=lambda p: abs(p.order - page.order))
     return [Path(p.image.path) for p in others[:limit]]
 
-def process_image(source: Path, book, max_side: int | None = None, extra_rotation: int = 0,
-                  fallback_sources: list[Path] | None = None, photo_page: bool = False,
-                  page_trim: tuple | None = None) -> Image.Image:
-    """Apply the book's settings. With max_side, work on a downscaled copy (preview).
-
-    page_trim: (left, top, right, bottom) in percent for this page only, replacing the book's trim.
-
-    extra_rotation: manual clockwise turn (multiple of 90) chosen for this page by the user.
-    fallback_sources: sibling photos used to locate the page when it cannot be detected itself.
-    photo_page: the page has a photo, so the book's photo_* rendering settings apply.
-    """
+def prepare_page_image(source: Path, book, max_side: int | None = None, extra_rotation: int = 0,
+                       fallback_sources: list[Path] | None = None, photo_page: bool = False,
+                       page_trim: tuple | None = None) -> tuple[Image.Image, int]:
+    """Apply page-level adjustments, before margin cropping and output-page formatting."""
     if photo_page:
         book = _PhotoSettings(book)
     with Image.open(source) as original:
         image = ImageOps.exif_transpose(original).convert("RGB")
     if max_side and max(image.size) > 3 * max_side:
-        image.thumbnail((3 * max_side, 3 * max_side), Image.LANCZOS)  # keeps preview fast on huge photos
+        image.thumbnail((3 * max_side, 3 * max_side), Image.LANCZOS)
     if book.auto_crop_page:
-        # Done before the final downscale so the cut-out page keeps its detail.
         fallback = (lambda: sibling_quad(fallback_sources)) if fallback_sources else None
         image = crop_to_page(image, fallback)
     turn = page_rotation(source, image, book) if book.auto_rotate else 0
@@ -453,8 +503,10 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
         image.thumbnail((max_side, max_side), Image.LANCZOS)
     if book.lift_colored_pages:
         image = lift_colored_page(image)
+    if book.neutralize_yellow_background:
+        image = neutralize_yellow_background(image)
     if book.brightness != 1.0:
-        image = ImageEnhance.Brightness(image).enhance(book.brightness)
+        image = adjust_brightness(image, book.brightness)
     if book.contrast != 1.0:
         image = ImageEnhance.Contrast(image).enhance(book.contrast)
     if book.clahe:
@@ -473,16 +525,35 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
         image = ImageOps.grayscale(image).convert("RGB")
     elif book.output_mode == "bw":
         image = binarize(image)
+    return image, base_side
+
+
+def apply_page_layout(image: Image.Image, book, max_side: int | None = None,
+                      base_side: int | None = None) -> Image.Image:
+    """Apply the final margin crop and output format to an adjusted page."""
+    if base_side is None:
+        base_side = max(image.size)
     if book.crop_margins:
         padding = book.crop_padding
         if max_side:
-            # Keep the padding proportional on the downscaled preview.
             padding = round(padding * max(image.size) / base_side)
         image = crop_page(image, padding)
     if book.page_format == "a4":
         image = fit_to_a4(image, scale=max_side / A4_PX[1] if max_side else 1.0,
                           margin_mm=book.a4_margin_mm, align=book.a4_align)
     return image
+
+
+def process_image(source: Path, book, max_side: int | None = None, extra_rotation: int = 0,
+                  fallback_sources: list[Path] | None = None, photo_page: bool = False,
+                  page_trim: tuple | None = None) -> Image.Image:
+    """Apply all page adjustments and final output layout. With max_side, make a preview."""
+    image, base_side = prepare_page_image(
+        source, book, max_side, extra_rotation, fallback_sources, photo_page, page_trim,
+    )
+    settings = _PhotoSettings(book) if photo_page else book
+    return apply_page_layout(image, settings, max_side, base_side)
+
 
 def preprocess_image(source: Path, destination: Path, book, extra_rotation: int = 0,
                      fallback_sources: list[Path] | None = None, photo_page: bool = False,

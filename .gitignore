@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-paddle/
 venv/
 
 # Django: local database, uploaded book scans and generated PDFs (private documents)

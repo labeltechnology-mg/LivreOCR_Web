@@ -1,6 +1,19 @@
 from django.conf import settings
 from django.db import models
 
+class PriceSettings(models.Model):
+    price_text = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_table = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_chart = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_photo = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    currency = models.CharField(max_length=8, default="€")
+
+    @classmethod
+    def load(cls):
+        price_settings, _ = cls.objects.get_or_create(pk=1)
+        return price_settings
+
+
 class Book(models.Model):
     STATUS_CHOICES = [
         ("new", "À préparer"),
@@ -47,6 +60,11 @@ class Book(models.Model):
     photo_show_through = models.FloatField(default=0.0)
     photo_denoise_mode = models.CharField(max_length=10, choices=DENOISE_MODES, default="off")
     photo_unsharp = models.FloatField(default=0.3)
+    price_text = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_table = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_chart = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_photo = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    currency = models.CharField(max_length=8, default="€")
     # Manual trim of each side of the upright page, in percent: strips of the neighbouring page, shadows...
     edge_trim_left = models.FloatField(default=0.0)
     edge_trim_top = models.FloatField(default=0.0)
@@ -55,6 +73,7 @@ class Book(models.Model):
     a4_margin_mm =models.PositiveSmallIntegerField(default=5)   # white border around the page on the A4 sheet
     a4_align = models.CharField(max_length=10, choices=[("center", "Centrée"), ("top", "En haut")], default="center")
     lift_colored_pages = models.BooleanField(default=True)  # brighten full-colour pages (yellow, green...) photographed too dark
+    neutralize_yellow_background = models.BooleanField(default=False)
     toc_links = models.BooleanField(default=True)  # make table-of-contents entries clickable in the PDF
     auto_crop_page = models.BooleanField(default=True)
     crop_margins =models.BooleanField(default=True)
@@ -63,9 +82,38 @@ class Book(models.Model):
     deskew = models.BooleanField(default=True)
     output_pdf = models.FileField(upload_to="books/%Y/%m/final/", blank=True)
     error_message = models.TextField(blank=True)
+    # Background job (see jobs.py). Written only with queryset.update(): a form save must never overwrite them.
+    job_kind = models.CharField(max_length=10, blank=True, default="")      # "process", "analyze" or "" (none)
+    job_progress = models.PositiveSmallIntegerField(default=0)              # 0-1000, a thousandth of the job
+    job_step = models.CharField(max_length=200, blank=True, default="")
+    job_heartbeat = models.DateTimeField(null=True, blank=True)             # last sign of life of the worker
+    job_cancel = models.BooleanField(default=False)
+    job_result = models.TextField(blank=True, default="")                   # "success|text" lines, shown once
 
     class Meta:
         ordering = ["-created_at"]
+
+    def yield_summary(self) -> dict:
+        """Pages counted by type, priced, and summed: the book's yield ("rendement").
+
+        Pages not analysed yet have no type and no price: they are reported apart so the total is
+        never mistaken for a complete one.
+        """
+        from collections import Counter
+        from decimal import Decimal
+        from .classify import LABELS, TYPES
+        pages = list(self.pages.all())      # uses the prefetched pages when there are some
+        counts = Counter(page.page_type for page in pages)
+        rows = []
+        for kind in TYPES:
+            price = getattr(self, f"price_{kind}") or Decimal(0)
+            rows.append({"type": kind, "label": LABELS[kind], "count": counts[kind], "price": price,
+                         "subtotal": price * counts[kind]})
+        total = sum((row["subtotal"] for row in rows), Decimal(0))
+        analysed = sum(row["count"] for row in rows)
+        return {"rows": rows, "total": total, "pages": len(pages), "analysed": analysed,
+                "unanalysed": len(pages) - analysed,
+                "average": (total / analysed) if analysed else Decimal(0)}
 
     def __str__(self):
         return self.title

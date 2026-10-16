@@ -1,11 +1,12 @@
-"""Tell text pages, graph/curve pages and pages with an image apart."""
+"""Tell text pages, tables, graph/curve pages and pages with an image apart."""
 import cv2
 import numpy as np
 from PIL import Image
 
-TEXT, CHART, PHOTO = "text", "chart", "photo"
-LABELS = {TEXT: "Texte", CHART: "Graphique / courbe", PHOTO: "Image"}
-ICONS = {TEXT: "📄", CHART: "📈", PHOTO: "🖼"}
+TEXT, TABLE, CHART, PHOTO = "text", "table", "chart", "photo"
+TYPES = (TEXT, TABLE, CHART, PHOTO)
+LABELS = {TEXT: "Texte seulement", TABLE: "Avec tableau", CHART: "Avec graphique / courbe", PHOTO: "Avec image"}
+ICONS = {TEXT: "📄", TABLE: "▦", CHART: "📈", PHOTO: "🖼"}
 
 WORK_SIDE = 1000          # the page is analysed on a copy this many pixels on its long side
 PHOTO_MIN_AREA = 0.05     # share of the page a picture must cover to count as an image
@@ -13,6 +14,8 @@ PHOTO_MIN_TONE_RANGE = 55 # a picture spans many tones; a flat coloured box or a
 CHART_MIN_BLACK = 0.025   # share of the page covered by large solid black shapes (bars, plates)
 CHART_MIN_DRAWING = 0.15  # share of the page spanned by one connected line drawing (curve, axes)
 CHART_MAX_LETTERS = 450   # a drawing with more letters than this is a table or a text page
+TABLE_MIN_H_RULES = 4     # long horizontal rules needed to call a page a table...
+TABLE_MIN_V_RULES = 1     # ...and a vertical one (photographed thin column lines are often broken up)
 
 
 def _prepare(page: Image.Image):
@@ -74,24 +77,33 @@ def _chart_features(norm: np.ndarray) -> dict:
         bw, bh, area = stats[i][2], stats[i][3], stats[i][4]
         if bw * bh > 0.12 * h * w and area / float(bw * bh) < 0.35:
             drawing = max(drawing, bw * bh / float(h * w))
-    return {"solid": solid_share, "letters": letters, "drawing": drawing}
+    # A table is a grid: several long horizontal rules crossed by several long vertical ones.
+    def long_lines(mask, along_width, minimum):
+        count, _, stats, _ = cv2.connectedComponentsWithStats(cv2.dilate(mask, np.ones((3, 3), np.uint8)), connectivity=8)
+        return sum(1 for i in range(1, count) if (stats[i][2] if along_width else stats[i][3]) >= minimum)
+    horizontal_rules = long_lines(horizontal, True, 0.25 * w)
+    vertical_rules = long_lines(vertical, False, 0.06 * h)
+    return {"solid": solid_share, "letters": letters, "drawing": drawing,
+            "h_rules": horizontal_rules, "v_rules": vertical_rules}
 
 
 def classify_page(page: Image.Image) -> tuple[str, dict]:
     """Return (type, features). The page should already be cut out and straightened.
 
     A page that contains a picture counts as an image page even if it also has text.
-    Tables count as text: they are many letters in a grid, and read like text.
+    A grid of rules around a lot of text is a table; a drawing with little text is a chart.
     """
     norm = _prepare(page)
     picture = _picture_area(norm)
     chart = _chart_features(norm)
-    features = {"picture": round(picture, 3), "solid": round(chart["solid"], 3),
-                "letters": chart["letters"], "drawing": round(chart["drawing"], 3)}
+    features = {"picture": round(picture, 3), "solid": round(chart["solid"], 3), "letters": chart["letters"],
+                "drawing": round(chart["drawing"], 3), "h_rules": chart["h_rules"], "v_rules": chart["v_rules"]}
     if picture > 0:
         return PHOTO, features
     if chart["solid"] >= CHART_MIN_BLACK:
         return CHART, features
+    if chart["h_rules"] >= TABLE_MIN_H_RULES and chart["v_rules"] >= TABLE_MIN_V_RULES:
+        return TABLE, features
     if chart["drawing"] >= CHART_MIN_DRAWING and chart["letters"] < CHART_MAX_LETTERS:
         return CHART, features
     return TEXT, features

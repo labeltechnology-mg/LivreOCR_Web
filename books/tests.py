@@ -237,7 +237,7 @@ class TocEndToEndTests(TestCase):
                 path = Path(tmp) / f"s{order}.png"
                 image.save(path)
                 pages.append(type("P", (), {"image": type("I", (), {"path": str(path)}), "rotation": 0,
-                                            "has_photo": False, "order": order, "pk": order})())
+                                            "has_photo": False, "custom_trim": None, "order": order, "pk": order})())
             book = Book(language="fra", auto_rotate=False, auto_crop_page=False, crop_margins=False,
                         deskew=False, page_format="a4", toc_links=True)
             output = Path(tmp) / "out.pdf"
@@ -309,6 +309,29 @@ class ViewTests(TestCase):
         self.assertContains(response, "1 page(s) de texte")
         self.client.force_login(self.other)
         self.assertEqual(self.client.post(f"/livres/{self.book.pk}/analyser/").status_code, 404)
+
+    def test_each_page_can_have_its_own_edge_trim(self):
+        self.client.force_login(self.owner)
+        url = f"/livres/{self.book.pk}/pages/{self.page.pk}/rognage/"
+        reply = self.client.post(url, {"custom": "1", "left": "2", "top": "1", "right": "7.5", "bottom": "99"}).json()
+        self.assertEqual(reply, {"custom": True, "left": 2.0, "top": 1.0, "right": 7.5, "bottom": 25.0})   # capped at 25%
+        self.page.refresh_from_db()
+        self.assertEqual(self.page.custom_trim, (2.0, 1.0, 7.5, 25.0))
+        self.client.post(url, {"custom": "0", "left": "2", "top": "1", "right": "7.5", "bottom": "3"})
+        self.page.refresh_from_db()
+        self.assertIsNone(self.page.custom_trim)                       # back to the book's trim
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(url, {"custom": "1"}).status_code, 404)
+
+    def test_page_trim_replaces_the_book_trim_for_that_page_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "p.png"
+            Image.new("RGB", (1000, 2000), "white").save(source)
+            book = Book(auto_rotate=False, auto_crop_page=False, page_format="original", crop_margins=False,
+                        deskew=False, edge_trim_left=10, edge_trim_right=10)
+            self.assertEqual(process_image(source, book).size, (800, 2000))                          # the book's trim
+            self.assertEqual(process_image(source, book, page_trim=(0, 0, 0, 0)).size, (1000, 2000))  # this page: none
+            self.assertEqual(process_image(source, book, page_trim=(5, 0, 5, 10)).size, (900, 1800))  # this page: its own
 
     def test_rotation_and_photo_marking_are_saved_per_page(self):
         self.client.force_login(self.owner)

@@ -75,6 +75,12 @@ class PageImage(models.Model):
     order = models.PositiveIntegerField(default=0)
     rotation = models.PositiveSmallIntegerField(default=0)  # manual clockwise turn: 0, 90, 180 or 270
     has_photo = models.BooleanField(default=False)  # page with a photo: uses the book's photo_* settings
+    # Trim of this page's own edges, in percent. Used instead of the book's trim when trim_custom is set.
+    trim_custom = models.BooleanField(default=False)
+    trim_left = models.FloatField(default=0.0)
+    trim_top = models.FloatField(default=0.0)
+    trim_right = models.FloatField(default=0.0)
+    trim_bottom = models.FloatField(default=0.0)
     # Detected by the page analysis: "text", "chart" (graph or curve), "photo" (image) or "" (not analysed yet).
     page_type = models.CharField(max_length=10, blank=True, default="")
     uploaded_at = models.DateTimeField(auto_now_add=True)
@@ -82,6 +88,13 @@ class PageImage(models.Model):
     class Meta:
         ordering = ["order", "id"]
         unique_together = [("book", "order")]
+
+    @property
+    def custom_trim(self):
+        """(left, top, right, bottom) in percent when this page has its own trim, else None."""
+        if not self.trim_custom:
+            return None
+        return (self.trim_left, self.trim_top, self.trim_right, self.trim_bottom)
 
     @property
     def type_icon(self) -> str:

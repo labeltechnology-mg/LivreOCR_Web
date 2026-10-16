@@ -27,7 +27,7 @@ def build_searchable_pdf(book, pages, output_path: Path) -> dict:
         for index, page in enumerate(pages, start=1):
             source = Path(page.image.path)
             target = tmpdir / f"page_{index:05d}.png"
-            preprocess_image(source, target, book, page.rotation, same_side_neighbours(pages, page), page.has_photo)
+            preprocess_image(source, target, book, page.rotation, same_side_neighbours(pages, page), page.has_photo, page.custom_trim)
             processed_paths.append(target)
 
         image_pdf = tmpdir / "images.pdf"

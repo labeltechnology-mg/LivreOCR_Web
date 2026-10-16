@@ -93,7 +93,7 @@
         <summary>🗂 Pages importées ({{ pages|length }})</summary>
         <div class="page-list">
         {% for page in pages %}
-          <div class="page-row"><span>{% if page.type_icon %}{{ page.type_icon }} {% endif %}<strong>{{ page.order }}.</strong> {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</span><span class="muted">{{ page.image.size|filesizeformat }}</span></div>
+          <div class="page-row"><span>{% if page.type_icon %}{{ page.type_icon }} {% endif %}<strong>{{ page.order }}.</strong> {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}{% if page.trim_custom %} ✂{% endif %}</span><span class="muted">{{ page.image.size|filesizeformat }}</span></div>
         {% endfor %}
         </div>
         <p class="muted">L’ordre suit l’ordre d’import.</p>
@@ -147,7 +147,7 @@
       <div class="preview-bar">
         <button class="btn secondary" id="preview-previous" type="button" aria-label="Afficher la page précédente">←</button>
         <select id="preview-page" aria-label="Sélectionner la page à prévisualiser">
-          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}">{% if page.type_icon %}{{ page.type_icon }} {% endif %}{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}</option>{% endfor %}
+          {% for page in pages %}<option value="{{ page.pk }}" data-photo="{% if page.has_photo %}1{% else %}0{% endif %}" data-trim-custom="{% if page.trim_custom %}1{% else %}0{% endif %}" data-trim-left="{{ page.trim_left|stringformat:'g' }}" data-trim-top="{{ page.trim_top|stringformat:'g' }}" data-trim-right="{{ page.trim_right|stringformat:'g' }}" data-trim-bottom="{{ page.trim_bottom|stringformat:'g' }}">{% if page.type_icon %}{{ page.type_icon }} {% endif %}{{ page.order }}. {{ page.original_name }}{% if page.has_photo %} 📷{% endif %}{% if page.trim_custom %} ✂{% endif %}</option>{% endfor %}
         </select>
         <button class="btn secondary" id="preview-next" type="button" aria-label="Afficher la page suivante">→</button>
         <label class="photo-toggle" title="Cette page contient une photo : elle utilise les réglages du groupe « Pages avec photo »">
@@ -165,6 +165,16 @@
           <button class="btn secondary" id="zoom-reset" type="button">Ajuster</button>
         </div>
       </div>
+      <details class="page-trim" id="page-trim">
+        <summary>✂ Rognage de cette page <span class="muted" id="page-trim-state"></span></summary>
+        <label class="page-trim-custom"><input type="checkbox" id="page-trim-custom"> Rognage propre à cette page (sinon : celui du livre)</label>
+        <div class="page-trim-grid">
+          <label>Haut <output id="page-trim-top-out">0</output> %<input type="range" id="page-trim-top" min="0" max="25" step="0.5" value="0"></label>
+          <label>Bas <output id="page-trim-bottom-out">0</output> %<input type="range" id="page-trim-bottom" min="0" max="25" step="0.5" value="0"></label>
+          <label>Gauche <output id="page-trim-left-out">0</output> %<input type="range" id="page-trim-left" min="0" max="25" step="0.5" value="0"></label>
+          <label>Droite <output id="page-trim-right-out">0</output> %<input type="range" id="page-trim-right" min="0" max="25" step="0.5" value="0"></label>
+        </div>
+      </details>
       <div class="preview-grid">
         <figure><figcaption>Original</figcaption><div class="preview-image-wrap"><img id="preview-before" alt="Page originale" src="{{ pages.0.image.url }}"></div></figure>
         <figure><figcaption>Avec les réglages <span id="preview-state" class="muted" role="status" aria-live="polite">Préparation de l’aperçu…</span></figcaption><div class="preview-image-wrap"><img id="preview-after" alt="Page traitée avec les réglages actuels" hidden><span id="preview-placeholder" class="preview-placeholder">L’aperçu traité apparaîtra ici.</span></div></figure>
@@ -305,6 +315,59 @@
   });
   select.addEventListener("change", syncPhotoToggle);
   syncPhotoToggle();
+
+  // Trim of this page's edges: its own values, or the book's when the box is unchecked.
+  var trimUrl = box.dataset.urlTemplate.replace("apercu/0/", "pages/ID/rognage/");
+  var trimCustom = document.getElementById("page-trim-custom");
+  var trimState = document.getElementById("page-trim-state");
+  var sides = ["top", "bottom", "left", "right"];
+  var trimInputs = {};
+  sides.forEach(function (side) {
+    trimInputs[side] = document.getElementById("page-trim-" + side);
+    trimInputs[side].addEventListener("input", function () {
+      document.getElementById("page-trim-" + side + "-out").textContent = trimInputs[side].value;
+      scheduleTrimSave();
+    });
+  });
+  function bookTrim(side) { var field = form.elements["edge_trim_" + side]; return field ? field.value : "0"; }
+  function showTrim() {
+    var option = select.options[select.selectedIndex], custom = option.dataset.trimCustom === "1";
+    trimCustom.checked = custom;
+    sides.forEach(function (side) {
+      var value = custom ? option.dataset["trim" + side.charAt(0).toUpperCase() + side.slice(1)] : bookTrim(side);
+      trimInputs[side].value = value;
+      trimInputs[side].disabled = !custom;
+      document.getElementById("page-trim-" + side + "-out").textContent = value;
+    });
+    trimState.textContent = custom ? "(propre à cette page)" : "(réglage du livre)";
+  }
+  var trimTimer = null;
+  function scheduleTrimSave() { clearTimeout(trimTimer); trimTimer = setTimeout(saveTrim, 250); }
+  function saveTrim() {
+    var option = select.options[select.selectedIndex];
+    var body = new URLSearchParams({custom: trimCustom.checked ? "1" : "0"});
+    sides.forEach(function (side) { body.set(side, trimInputs[side].value); });
+    fetch(trimUrl.replace("ID", select.value), {method: "POST", headers: {"X-CSRFToken": csrf}, body: body})
+      .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+      .then(function (data) {
+        option.dataset.trimCustom = data.custom ? "1" : "0";
+        sides.forEach(function (side) { option.dataset["trim" + side.charAt(0).toUpperCase() + side.slice(1)] = data[side]; });
+        option.textContent = option.textContent.replace(" ✂", "") + (data.custom ? " ✂" : "");
+        showTrim();
+        refresh();
+      })
+      .catch(function () { state.textContent = "Enregistrement du rognage impossible."; });
+  }
+  trimCustom.addEventListener("change", function () {
+    if (trimCustom.checked) {
+      // Start from what the book does now, so switching it on changes nothing until a slider moves.
+      sides.forEach(function (side) { trimInputs[side].value = bookTrim(side); });
+    }
+    saveTrim();
+  });
+  select.addEventListener("change", showTrim);
+  form.addEventListener("input", function () { if (!trimCustom.checked) showTrim(); });
+  showTrim();
   document.getElementById("rotate-ccw").addEventListener("click", function () { rotatePage("ccw"); });
   document.getElementById("rotate-cw").addEventListener("click", function () { rotatePage("cw"); });
   previous.addEventListener("click", function () { movePage(-1); });

@@ -383,8 +383,11 @@ def same_side_neighbours(pages, page, limit: int = 4) -> list[Path]:
     return [Path(p.image.path) for p in others[:limit]]
 
 def process_image(source: Path, book, max_side: int | None = None, extra_rotation: int = 0,
-                  fallback_sources: list[Path] | None = None, photo_page: bool = False) -> Image.Image:
+                  fallback_sources: list[Path] | None = None, photo_page: bool = False,
+                  page_trim: tuple | None = None) -> Image.Image:
     """Apply the book's settings. With max_side, work on a downscaled copy (preview).
+
+    page_trim: (left, top, right, bottom) in percent for this page only, replacing the book's trim.
 
     extra_rotation: manual clockwise turn (multiple of 90) chosen for this page by the user.
     fallback_sources: sibling photos used to locate the page when it cannot be detected itself.
@@ -402,7 +405,8 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
         image = crop_to_page(image, fallback)
     turn = page_rotation(source, image, book) if book.auto_rotate else 0
     image = rotate_clockwise(image, turn + extra_rotation)
-    image = trim_sides(image, book.edge_trim_left, book.edge_trim_top, book.edge_trim_right, book.edge_trim_bottom)
+    left, top, right, bottom = page_trim or (book.edge_trim_left, book.edge_trim_top, book.edge_trim_right, book.edge_trim_bottom)
+    image = trim_sides(image, left, top, right, bottom)
     base_side = max(image.size)
     if max_side and base_side > max_side:
         image.thumbnail((max_side, max_side), Image.LANCZOS)
@@ -438,6 +442,7 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
     return image
 
 def preprocess_image(source: Path, destination: Path, book, extra_rotation: int = 0,
-                     fallback_sources: list[Path] | None = None, photo_page: bool = False) -> None:
+                     fallback_sources: list[Path] | None = None, photo_page: bool = False,
+                     page_trim: tuple | None = None) -> None:
     process_image(source, book, extra_rotation=extra_rotation, fallback_sources=fallback_sources,
-                  photo_page=photo_page).save(destination, "PNG", dpi=(300, 300), optimize=True)
+                  photo_page=photo_page, page_trim=page_trim).save(destination, "PNG", dpi=(300, 300), optimize=True)

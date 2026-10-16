@@ -150,7 +150,7 @@ def preview_page(request, pk, page_pk):
             size = 1000
         neighbours = same_side_neighbours(list(book.pages.all()), page) if draft.auto_crop_page else None
         image = process_image(Path(page.image.path), draft, max_side=size, extra_rotation=page.rotation,
-                              fallback_sources=neighbours, photo_page=page.has_photo)
+                              fallback_sources=neighbours, photo_page=page.has_photo, page_trim=page.custom_trim)
     except Exception:
         return HttpResponse("Impossible de générer l’aperçu.", status=500)
     buffer = io.BytesIO()
@@ -203,6 +203,26 @@ def analyze_pages(request, pk):
     if failed:
         messages.warning(request, f"{failed} page(s) n’ont pas pu être analysées.")
     return redirect("book_detail", pk=pk)
+
+@login_required
+@require_POST
+def set_page_trim(request, pk, page_pk):
+    """Give one page its own edge trim (or hand it back to the book's trim)."""
+    book = get_object_or_404(Book, pk=pk, owner=request.user)
+    page = get_object_or_404(PageImage, pk=page_pk, book=book)
+
+    def percent(name):
+        try:
+            return min(max(float(request.POST.get(name, 0)), 0.0), 25.0)
+        except ValueError:
+            return 0.0
+
+    page.trim_custom = request.POST.get("custom") == "1"
+    page.trim_left, page.trim_top = percent("left"), percent("top")
+    page.trim_right, page.trim_bottom = percent("right"), percent("bottom")
+    page.save(update_fields=["trim_custom", "trim_left", "trim_top", "trim_right", "trim_bottom"])
+    return JsonResponse({"custom": page.trim_custom, "left": page.trim_left, "top": page.trim_top,
+                         "right": page.trim_right, "bottom": page.trim_bottom})
 
 @login_required
 @require_POST

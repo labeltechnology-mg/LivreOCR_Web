@@ -46,7 +46,12 @@ class Book(models.Model):
     photo_show_through = models.FloatField(default=0.0)
     photo_denoise_mode = models.CharField(max_length=10, choices=DENOISE_MODES, default="off")
     photo_unsharp = models.FloatField(default=0.3)
-    a4_margin_mm = models.PositiveSmallIntegerField(default=5)   # white border around the page on the A4 sheet
+    # Manual trim of each side of the upright page, in percent: strips of the neighbouring page, shadows...
+    edge_trim_left = models.FloatField(default=0.0)
+    edge_trim_top = models.FloatField(default=0.0)
+    edge_trim_right = models.FloatField(default=0.0)
+    edge_trim_bottom = models.FloatField(default=0.0)
+    a4_margin_mm =models.PositiveSmallIntegerField(default=5)   # white border around the page on the A4 sheet
     a4_align = models.CharField(max_length=10, choices=[("center", "Centrée"), ("top", "En haut")], default="center")
     toc_links = models.BooleanField(default=True)  # make table-of-contents entries clickable in the PDF
     auto_crop_page = models.BooleanField(default=True)

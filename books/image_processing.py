@@ -178,6 +178,20 @@ def crop_to_page(image: Image.Image, fallback=None) -> Image.Image:
     warped = cv2.warpPerspective(np.array(image), matrix, (width, height), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     return trim_neighbour_edges(Image.fromarray(warped))
 
+MAX_EDGE_TRIM = 25.0       # most a side can be trimmed, in percent of the page size
+
+def trim_sides(image: Image.Image, left: float = 0, top: float = 0, right: float = 0, bottom: float = 0) -> Image.Image:
+    """Cut a percentage off each side of the (already upright) page: strips of the neighbouring
+    page, a shadow, a reflection... that the automatic crop could not tell from the page."""
+    if not any((left, top, right, bottom)):
+        return image
+    clamp = lambda v: min(max(float(v or 0), 0.0), MAX_EDGE_TRIM) / 100.0
+    l, t = round(image.width * clamp(left)), round(image.height * clamp(top))
+    r, b = image.width - round(image.width * clamp(right)), image.height - round(image.height * clamp(bottom))
+    if r - l < 50 or b - t < 50:
+        return image                      # never trim the page away
+    return image.crop((l, t, r, b))
+
 EDGE_DEPTH = 0.08          # how far from the border (share of the page size) a neighbour's edge is looked for
 EDGE_STEP = 35             # tone jump (0-255) that makes a boundary
 EDGE_VARIATION = 18        # a neighbour's edge (coloured tabs, stacked pages) varies along the strip
@@ -202,22 +216,19 @@ def trim_neighbour_edges(image: Image.Image) -> Image.Image:
         if depth < 8:
             return 0
         profile = g[rows, g.shape[1] - depth:].mean(axis=0)            # columns, inside -> outside
-        best, best_jump = 0, 0.0
-        for x in range(4, depth - 2):
-            jump = float(profile[x:x + 3].mean() - profile[x - 4:x].mean())
-            if jump > best_jump:
-                best, best_jump = x, jump
-        if best_jump < EDGE_STEP:
-            return 0
-        start = g.shape[1] - depth + best
-        inside = g[rows, max(0, start - int(g.shape[1] * 0.03)):start].mean()
-        strip = g[rows, start + 2:g.shape[1]]
-        if inside > 110 or strip.shape[1] < 3:
-            return 0                                                   # the page is not dark up to the boundary
-        along = strip.mean(axis=1)
-        if float(along.std()) < EDGE_VARIATION:
-            return 0                                                   # a uniform strip is just a margin
-        return g.shape[1] - start
+        jumps = [float(profile[x:x + 3].mean() - profile[x - 4:x].mean()) for x in range(4, depth - 2)]
+        # Case 1: a dark page with a brighter, uneven strip beyond it (index tabs, stacked leaves).
+        best = int(np.argmax(jumps)) + 4
+        if jumps[best - 4] >= EDGE_STEP:
+            start = g.shape[1] - depth + best
+            inside = g[rows, max(0, start - int(g.shape[1] * 0.03)):start].mean()
+            strip = g[rows, start + 2:g.shape[1]]
+            if inside <= 110 and strip.shape[1] >= 3 and float(strip.mean(axis=1).std()) >= EDGE_VARIATION:
+                return g.shape[1] - start
+        # Light pages are left alone: their borders (shadow, book block, reflection) differ too
+        # much from book to book for a rule that never cuts real content. The manual trim of the
+        # four edges (edge_trim_*) covers them.
+        return 0
 
     cuts = {
         "right": cut_from_far_edge(gray),
@@ -391,6 +402,7 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
         image = crop_to_page(image, fallback)
     turn = page_rotation(source, image, book) if book.auto_rotate else 0
     image = rotate_clockwise(image, turn + extra_rotation)
+    image = trim_sides(image, book.edge_trim_left, book.edge_trim_top, book.edge_trim_right, book.edge_trim_bottom)
     base_side = max(image.size)
     if max_side and base_side > max_side:
         image.thumbnail((max_side, max_side), Image.LANCZOS)

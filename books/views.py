@@ -73,6 +73,7 @@ def book_detail(request, pk):
         "book": book, "settings_form": settings_form, "pages": pages,
         "preview_pages_json": json.dumps(preview_pages).replace("<", "\\u003c"),
         "photo_count": sum(1 for p in pages if p.has_photo),
+        "edge_trimmed": any((book.edge_trim_left, book.edge_trim_top, book.edge_trim_right, book.edge_trim_bottom)),
         "type_counts": {
             "text": sum(1 for p in pages if p.page_type == TEXT),
             "chart": sum(1 for p in pages if p.page_type == CHART),
@@ -130,7 +131,14 @@ def preview_page(request, pk, page_pk):
     page = get_object_or_404(PageImage, pk=page_pk, book=book)
     # Unsaved copy so the stored settings stay untouched until the user saves.
     draft = Book(owner=book.owner, title=book.title)
-    form = ProcessingSettingsForm(request.GET, instance=draft)
+    # A page opened before an update may not send the newest settings: use the saved value for
+    # any setting that is missing, instead of refusing the preview. (An unchecked box is simply
+    # absent from a form, so checkboxes are left as they are.)
+    data = request.GET.copy()
+    for name, field in ProcessingSettingsForm().fields.items():
+        if name not in data and field.widget.input_type != "checkbox":
+            data[name] = getattr(book, name)
+    form = ProcessingSettingsForm(data, instance=draft)
     if not form.is_valid():
         return HttpResponse("Paramètres invalides.", status=400)
     form.save(commit=False)

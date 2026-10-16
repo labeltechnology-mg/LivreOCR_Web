@@ -13,11 +13,16 @@ class BookCreateForm(forms.ModelForm):
 class ProcessingSettingsForm(forms.ModelForm):
     class Meta:
         model = Book
-        fields = ["language", "page_format", "a4_margin_mm", "a4_align", "toc_links", "output_mode", "brightness", "contrast", "clahe", "background_clean", "show_through", "denoise_mode", "unsharp",
+        fields = ["language", "page_format", "a4_margin_mm", "a4_align", "toc_links",
+                  "edge_trim_left", "edge_trim_top", "edge_trim_right", "edge_trim_bottom", "output_mode", "brightness", "contrast", "clahe", "background_clean", "show_through", "denoise_mode", "unsharp",
                   "auto_crop_page", "crop_margins", "crop_padding", "auto_rotate", "deskew",
                   "photo_output_mode", "photo_brightness", "photo_contrast", "photo_clahe",
                   "photo_background_clean", "photo_show_through", "photo_denoise_mode", "photo_unsharp"]
         labels = {
+            "edge_trim_left": "Gauche (%)",
+            "edge_trim_top": "Haut (%)",
+            "edge_trim_right": "Droite (%)",
+            "edge_trim_bottom": "Bas (%)",
             "a4_margin_mm": "Marge autour de la page sur l’A4 (mm)",
             "a4_align": "Position de la page sur l’A4",
             "toc_links": "Table des matières cliquable (liens et signets dans le PDF)",
@@ -68,6 +73,10 @@ class ProcessingSettingsForm(forms.ModelForm):
             "photo_contrast": RangeInput(attrs={"min": "0.5", "max": "2.0", "step": "0.05"}),
             "photo_show_through": RangeInput(attrs={"min": "0", "max": "1", "step": "0.05"}),
             "photo_unsharp": RangeInput(attrs={"min": "0", "max": "2.0", "step": "0.1"}),
+            "edge_trim_left": RangeInput(attrs={"min": "0", "max": "25", "step": "0.5"}),
+            "edge_trim_top": RangeInput(attrs={"min": "0", "max": "25", "step": "0.5"}),
+            "edge_trim_right": RangeInput(attrs={"min": "0", "max": "25", "step": "0.5"}),
+            "edge_trim_bottom": RangeInput(attrs={"min": "0", "max": "25", "step": "0.5"}),
             "a4_margin_mm": forms.NumberInput(attrs={"min": "0", "max": "30"}),
             "crop_padding":forms.NumberInput(attrs={"min": "0", "max": "100"}),
         }

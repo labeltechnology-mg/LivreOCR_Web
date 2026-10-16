@@ -69,6 +69,14 @@
           {% include "books/_field.html" with field=settings_form.photo_denoise_mode %}
           {% include "books/_field.html" with field=settings_form.photo_unsharp %}
         </details>
+        <details class="tool-group" {% if edge_trimmed %}open{% endif %}>
+          <summary>🔲 Rogner les bords de la page</summary>
+          <p class="muted">Retire une bande sur chaque côté de la page redressée : tranche des pages voisines, ombre, reflet. Réglez en regardant l’aperçu.</p>
+          {% include "books/_field.html" with field=settings_form.edge_trim_top %}
+          {% include "books/_field.html" with field=settings_form.edge_trim_bottom %}
+          {% include "books/_field.html" with field=settings_form.edge_trim_left %}
+          {% include "books/_field.html" with field=settings_form.edge_trim_right %}
+        </details>
         <details class="tool-group">
           <summary>✂️ Recadrage et orientation</summary>
           {% include "books/_field.html" with field=settings_form.auto_crop_page %}
@@ -304,7 +312,7 @@
   refresh();
 
   var presets = {
-    default: {a4_margin_mm: 5, a4_align: "center", toc_links: true, photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
+    default: {edge_trim_left: 0, edge_trim_top: 0, edge_trim_right: 0, edge_trim_bottom: 0, a4_margin_mm: 5, a4_align: "center", toc_links: true, photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
               photo_background_clean: false, photo_show_through: 0, photo_denoise_mode: "off", photo_unsharp: 0.3,
               language: "fra+eng", page_format: "a4", output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: false,
               background_clean: false, show_through: 0, denoise_mode: "off", unsharp: 0, auto_crop_page: true,

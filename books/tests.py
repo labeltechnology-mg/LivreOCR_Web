@@ -55,6 +55,15 @@ class ImageProcessingTests(TestCase):
         rows = np.where(centred.min(axis=1) == 0)[0]
         self.assertAlmostEqual(rows[0], centred.shape[0] - rows[-1], delta=3)     # balanced above and below
 
+    def test_manual_edge_trim(self):
+        from .image_processing import trim_sides
+        page = Image.new("RGB", (1000, 2000), "white")
+        self.assertEqual(trim_sides(page).size, (1000, 2000))                              # nothing asked, nothing cut
+        self.assertEqual(trim_sides(page, left=2, top=1, right=7, bottom=10).size, (910, 1780))
+        self.assertEqual(trim_sides(page, left=90, right=90).size, (500, 2000))            # at most 25% per side
+        self.assertEqual(trim_sides(Image.new("RGB", (80, 80)), left=25, right=25).size, (80, 80))   # never trims the page away
+        self.assertEqual(trim_sides(page, left=-5).size, (1000, 2000))                     # negative values are ignored
+
     def test_neighbour_edge_is_trimmed_only_next_to_a_dark_page(self):
         from .image_processing import trim_neighbour_edges
         page = Image.new("RGB", (800, 1000), (35, 25, 15))

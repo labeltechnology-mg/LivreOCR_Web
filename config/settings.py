@@ -73,9 +73,7 @@ LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = "Indian/Antananarivo"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
 MEDIA_ROOT = Path(os.environ.get("LIVREOCR_MEDIA_ROOT", BASE_DIR / "media"))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
@@ -94,6 +92,18 @@ JOBS_RUN_INLINE = os.environ.get("LIVREOCR_JOBS_INLINE", "0") == "1"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "gemma3:4b")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
+# ---- Ocypete OCR ----
+# Background jobs (OCR, exports, analysis) are run by "python manage.py run_worker".
+# Set LIVREOCR_TASKS_EAGER=1 to run them inside the request instead (no worker needed, slow requests).
+LIVREOCR_TASKS_EAGER = os.environ.get("LIVREOCR_TASKS_EAGER", "0") == "1"
+# A running job whose heartbeat is older than this is considered dead (worker killed, server restarted).
+LIVREOCR_JOB_STALE_SECONDS = int(os.environ.get("LIVREOCR_JOB_STALE_SECONDS", "1800"))
+# Folders searched (recursively) for the TrueType fonts offered in the rebuilt PDF.
+LIVREOCR_FONT_DIRS = [p for p in os.environ.get(
+    "LIVREOCR_FONT_DIRS", f"{BASE_DIR / 'fonts'}:/usr/share/fonts:/usr/local/share/fonts").split(":") if p]
+LIVREOCR_MAX_IMAGE_PIXELS = int(os.environ.get("LIVREOCR_MAX_IMAGE_PIXELS", str(150_000_000)))
+LIVREOCR_MAX_PDF_PAGES = int(os.environ.get("LIVREOCR_MAX_PDF_PAGES", "600"))
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
@@ -109,3 +119,5 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = HTTPS
     SECURE_SSL_REDIRECT = HTTPS
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # HSTS is opt-in: once a browser has seen it, plain http stops working for that long.
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "0"))

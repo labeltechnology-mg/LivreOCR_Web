@@ -10,9 +10,10 @@ db.sqlite3
 media/
 staticfiles/
 
-# Secrets and local settings
-.env
+# Secrets and local settings (also catches ".env " with a stray space, ".env.local"...)
+.env*
 *.env
+!.env.example
 
 # Editors and OS
 .vscode/

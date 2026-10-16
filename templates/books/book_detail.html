@@ -257,7 +257,7 @@
     before.src = pages[id];
     box.setAttribute("aria-busy", "true");
     state.textContent = "Mise à jour de l’aperçu…";
-    var url = box.dataset.urlTemplate.replace(/0\/$/, id + "/") + "?" + params() + "&size=" + previewSize();
+    var url = box.dataset.urlTemplate.replace(/0\/$/, id + "/") + "?" + params() + "&size=" + previewSize() + "&t=" + Date.now();   // unique: page-level changes (rotation, trim, photo) leave the settings unchanged, and an identical URL would not refresh the image
     var img = new Image();
     img.onload = function () {
       if (mine !== counter) return;

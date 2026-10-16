@@ -55,6 +55,20 @@ class ImageProcessingTests(TestCase):
         rows = np.where(centred.min(axis=1) == 0)[0]
         self.assertAlmostEqual(rows[0], centred.shape[0] - rows[-1], delta=3)     # balanced above and below
 
+    def test_quality_chain_runs_and_keeps_text_dark_and_paper_light(self):
+        from . import image_processing as ip
+        self.assertEqual((ip.CLAHE_CLIP_LIMIT, ip.BILATERAL_DIAMETER, ip.NLM_STRENGTH, ip.UNSHARP_SIGMA), (1.45, 5, 2.5, 0.65))
+        page = text_page(600, 800)
+        rng = np.random.default_rng(3)
+        noisy = Image.fromarray((np.array(page).astype(float) + rng.normal(0, 6, (800, 600, 3))).clip(0, 255).astype("uint8"))
+        smoothed = ip.denoise(noisy, "combined")
+        self.assertLess(np.array(smoothed.convert("L"))[:100].std(), np.array(noisy.convert("L"))[:100].std())   # grain reduced
+        result = ip.unsharp(ip.apply_clahe(smoothed), 1.22)
+        gray = np.array(result.convert("L"))
+        self.assertEqual(result.size, page.size)
+        self.assertLess(gray.min(), 60)                    # ink still dark
+        self.assertGreater(np.median(gray), 200)           # paper still light
+
     def test_manual_edge_trim(self):
         from .image_processing import trim_sides
         page = Image.new("RGB", (1000, 2000), "white")

@@ -16,6 +16,7 @@
         <select id="preset">
           <option value="">— Choisir un préréglage —</option>
           <option value="default">↺ Réglages d’origine</option>
+          <option value="quality">Qualité nette (CLAHE 1,45 · lissage · bruit · netteté 1,22)</option>
           <option value="clean">Livre propre (net, fond blanc)</option>
           <option value="old">Livre ancien / papier jauni</option>
           <option value="photo">Photo téléphone (ombres)</option>
@@ -380,6 +381,8 @@
               language: "fra+eng", page_format: "a4", output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: false,
               background_clean: false, show_through: 0, denoise_mode: "off", unsharp: 0, auto_crop_page: true,
               crop_margins: true, crop_padding: 20, auto_rotate: true, deskew: true},
+    // Only the sharpening chain: it changes nothing else (output mode, background, show-through, crop...).
+    quality: {clahe: true, denoise_mode: "combined", unsharp: 1.22},
     clean: {output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: true, background_clean: true, show_through: 0.4, denoise_mode: "off", unsharp: 0.5, deskew: true},
     old:   {output_mode: "color", brightness: 1.05, contrast: 1.1, clahe: true, background_clean: true, show_through: 0.6, denoise_mode: "edge", unsharp: 0.7, deskew: true},
     photo: {output_mode: "gray", brightness: 1.0, contrast: 1.0, clahe: true, background_clean: true, show_through: 0.6, denoise_mode: "edge", unsharp: 0.8, deskew: true},

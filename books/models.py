@@ -17,6 +17,7 @@ class Book(models.Model):
         ("off", "Aucun"),
         ("median", "Médian léger"),
         ("edge", "Préservant les contours"),
+        ("combined", "Lissage + réduction du bruit"),
     ]
     PAGE_FORMATS = [
         ("a4", "A4 (210 × 297 mm)"),

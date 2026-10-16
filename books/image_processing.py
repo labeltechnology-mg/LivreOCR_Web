@@ -22,6 +22,10 @@ def crop_page(image: Image.Image, padding: int = 20) -> Image.Image:
     x1, y1 = min(image.width, x+w+padding), min(image.height, y+h+padding)
     return image.crop((x0, y0, x1, y1))
 
+CLAHE_CLIP_LIMIT = 1.45    # local contrast: moderate, so grain and paper texture are not amplified
+BILATERAL_DIAMETER = 5     # edge-preserving smoothing
+NLM_STRENGTH = 2.5         # non-local-means noise reduction ("h")
+UNSHARP_SIGMA = 0.65       # blur radius of the unsharp mask, in pixels
 MAX_PAPER_GAIN = 2.2  # never brighten a page by more than this when "whitening" its paper
 
 def _paper_level(values: np.ndarray) -> float:
@@ -246,7 +250,7 @@ def apply_clahe(image: Image.Image) -> Image.Image:
     """Moderate local contrast (CLAHE) on the lightness channel only, so colors stay natural."""
     lab = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2LAB)
     l, a, b = cv2.split(lab)
-    equalized = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
+    equalized = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT, tileGridSize=(8, 8)).apply(l)
     # CLAHE would lift solid black areas (bars, plates) to grey: keep the original there.
     paper = _paper_level(l)
     keep =np.clip((0.45 - l.astype(np.float32) / paper) / 0.2, 0, 1)
@@ -274,11 +278,19 @@ def denoise(image: Image.Image, mode: str) -> Image.Image:
     rgb = np.array(image)
     if mode == "median":
         return Image.fromarray(cv2.medianBlur(rgb, 3))
-    return Image.fromarray(cv2.bilateralFilter(rgb, 5, 30, 30))
+    smoothed = cv2.bilateralFilter(rgb, BILATERAL_DIAMETER, 30, 30)
+    if mode == "combined":
+        # Edge-preserving smoothing first, then a light non-local-means pass for the grain.
+        smoothed = cv2.fastNlMeansDenoisingColored(smoothed, None, NLM_STRENGTH, NLM_STRENGTH, 7, 21)
+    return Image.fromarray(smoothed)
 
 def unsharp(image: Image.Image, amount: float) -> Image.Image:
-    """Unsharp mask; the threshold leaves flat paper untouched, which limits halos and noise boost."""
-    radius = max(0.8, max(image.size) / 1200)
+    """Unsharp mask; the threshold leaves flat paper untouched, which limits halos and noise boost.
+
+    The blur radius is UNSHARP_SIGMA pixels on a page about 2400 px long and grows with larger pages,
+    so the sharpening looks the same at any resolution (but never goes below 0.5 px, where it does nothing).
+    """
+    radius = max(0.5, UNSHARP_SIGMA * max(image.size) / 2400)
     return image.filter(ImageFilter.UnsharpMask(radius=radius, percent=int(amount * 100), threshold=3))
 
 def _skew_score(binary: np.ndarray, angle: float) -> float:

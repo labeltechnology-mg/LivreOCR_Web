@@ -1,6 +1,6 @@
 Django>=5.1,<6.0
 Pillow>=10.0,<13
-opencv-python-headless>=4.9,<6
+opencv-python-headless>=5.0.0.93,<6
 numpy>=1.26,<3
 psycopg[binary]>=3.2,<4
 gunicorn>=22.0

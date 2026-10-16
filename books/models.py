@@ -54,6 +54,7 @@ class Book(models.Model):
     edge_trim_bottom = models.FloatField(default=0.0)
     a4_margin_mm =models.PositiveSmallIntegerField(default=5)   # white border around the page on the A4 sheet
     a4_align = models.CharField(max_length=10, choices=[("center", "Centrée"), ("top", "En haut")], default="center")
+    lift_colored_pages = models.BooleanField(default=True)  # brighten full-colour pages (yellow, green...) photographed too dark
     toc_links = models.BooleanField(default=True)  # make table-of-contents entries clickable in the PDF
     auto_crop_page = models.BooleanField(default=True)
     crop_margins =models.BooleanField(default=True)

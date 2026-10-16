@@ -69,6 +69,25 @@ class ImageProcessingTests(TestCase):
         self.assertLess(gray.min(), 60)                    # ink still dark
         self.assertGreater(np.median(gray), 200)           # paper still light
 
+    def test_flat_coloured_pages_are_brightened_and_nothing_else(self):
+        from .image_processing import lift_colored_page
+        rng = np.random.default_rng(5)
+
+        def flat(colour, size=(400, 500)):
+            noise = rng.normal(0, 4, (size[1], size[0], 3))
+            return Image.fromarray((np.array(colour, float) + noise).clip(0, 255).astype("uint8"))
+
+        olive = flat((103, 113, 4))                                        # dark yellow-green page
+        lifted = np.array(lift_colored_page(olive)).reshape(-1, 3).mean(axis=0)
+        self.assertGreater(lifted[1], 170)                                 # clearly brighter
+        self.assertGreater(lifted[1], lifted[0])                           # still yellow-green: hue kept
+        self.assertLess(lifted[2], 20)
+        for untouched in (flat((255, 255, 255)), flat((200, 195, 190)),    # white and dull paper
+                          flat((31, 24, 17)),                              # nearly black picture
+                          flat((235, 220, 20))):                           # already bright yellow
+            self.assertTrue(np.array_equal(np.array(lift_colored_page(untouched)), np.array(untouched)))
+        self.assertTrue(np.array_equal(np.array(lift_colored_page(text_page(300, 400))), np.array(text_page(300, 400))))   # a text page
+
     def test_manual_edge_trim(self):
         from .image_processing import trim_sides
         page = Image.new("RGB", (1000, 2000), "white")

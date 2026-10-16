@@ -246,6 +246,35 @@ def trim_neighbour_edges(image: Image.Image) -> Image.Image:
     top, bottom = round(cuts["top"] / scale), round(cuts["bottom"] / scale)
     return image.crop((left, top, image.width - right, image.height - bottom))
 
+COLOR_PAGE_TARGET = 170    # brightness (0-255) a flat coloured page is brought to
+COLOR_PAGE_SHARE = 0.60    # share of the page that must be one flat colour for it to count
+COLOR_PAGE_SATURATION = 0.60   # vivid colours only: a dull brown or grey picture is left as it is
+COLOR_PAGE_MIN_LUMINANCE = 50  # a nearly black page is a dark picture, not a coloured page that was underexposed
+
+def lift_colored_page(image: Image.Image) -> Image.Image:
+    """Brighten a page whose background is one flat, saturated colour (a yellow or green opener page).
+
+    Such a page has no white paper to measure, so it stays as dark as the camera exposed it,
+    while the white pages of the same book are lifted to white. The colour is brought to a
+    mid-bright tone (at most 2.2x, hue kept) so its text becomes readable again. A page that
+    is not mostly one saturated colour comes back untouched.
+    """
+    scale = 400 / max(image.size)
+    small = np.array(image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.BILINEAR)) if scale < 1 else np.array(image)
+    pixels = small.reshape(-1, 3).astype(np.float32)
+    median = np.median(pixels, axis=0)
+    hsv = cv2.cvtColor(np.uint8([[median]]), cv2.COLOR_RGB2HSV)[0, 0]
+    flat = float(np.mean(np.linalg.norm(pixels - median, axis=1) < 45))
+    if flat < COLOR_PAGE_SHARE or hsv[1] / 255.0 < COLOR_PAGE_SATURATION:
+        return image
+    luminance = float(median @ np.array([0.299, 0.587, 0.114], np.float32))
+    if luminance < COLOR_PAGE_MIN_LUMINANCE:
+        return image
+    gain = min(COLOR_PAGE_TARGET / luminance, MAX_PAPER_GAIN)
+    if gain < 1.1:
+        return image                                    # already bright enough
+    return Image.fromarray(np.clip(np.array(image).astype(np.float32) * gain, 0, 255).astype(np.uint8))
+
 def apply_clahe(image: Image.Image) -> Image.Image:
     """Moderate local contrast (CLAHE) on the lightness channel only, so colors stay natural."""
     lab = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2LAB)
@@ -422,6 +451,8 @@ def process_image(source: Path, book, max_side: int | None = None, extra_rotatio
     base_side = max(image.size)
     if max_side and base_side > max_side:
         image.thumbnail((max_side, max_side), Image.LANCZOS)
+    if book.lift_colored_pages:
+        image = lift_colored_page(image)
     if book.brightness != 1.0:
         image = ImageEnhance.Brightness(image).enhance(book.brightness)
     if book.contrast != 1.0:

@@ -36,6 +36,7 @@
         </details>
         <details class="tool-group" open>
           <summary>🎨 Rendu des pages de texte</summary>
+          {% include "books/_field.html" with field=settings_form.lift_colored_pages %}
           {% include "books/_field.html" with field=settings_form.output_mode %}
           {% include "books/_field.html" with field=settings_form.brightness %}
           {% include "books/_field.html" with field=settings_form.contrast %}
@@ -376,7 +377,7 @@
   refresh();
 
   var presets = {
-    default: {edge_trim_left: 0, edge_trim_top: 0, edge_trim_right: 0, edge_trim_bottom: 0, a4_margin_mm: 5, a4_align: "center", toc_links: true, photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
+    default: {lift_colored_pages: true, edge_trim_left: 0, edge_trim_top: 0, edge_trim_right: 0, edge_trim_bottom: 0, a4_margin_mm: 5, a4_align: "center", toc_links: true, photo_output_mode: "color", photo_brightness: 1.3, photo_contrast: 1.1, photo_clahe: false,
               photo_background_clean: false, photo_show_through: 0, photo_denoise_mode: "off", photo_unsharp: 0.3,
               language: "fra+eng", page_format: "a4", output_mode: "color", brightness: 1.0, contrast: 1.0, clahe: false,
               background_clean: false, show_through: 0, denoise_mode: "off", unsharp: 0, auto_crop_page: true,

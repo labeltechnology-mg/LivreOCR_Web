@@ -13,12 +13,13 @@ class BookCreateForm(forms.ModelForm):
 class ProcessingSettingsForm(forms.ModelForm):
     class Meta:
         model = Book
-        fields = ["language", "page_format", "a4_margin_mm", "a4_align", "toc_links",
+        fields = ["language", "page_format", "a4_margin_mm", "a4_align", "toc_links", "lift_colored_pages",
                   "edge_trim_left", "edge_trim_top", "edge_trim_right", "edge_trim_bottom", "output_mode", "brightness", "contrast", "clahe", "background_clean", "show_through", "denoise_mode", "unsharp",
                   "auto_crop_page", "crop_margins", "crop_padding", "auto_rotate", "deskew",
                   "photo_output_mode", "photo_brightness", "photo_contrast", "photo_clahe",
                   "photo_background_clean", "photo_show_through", "photo_denoise_mode", "photo_unsharp"]
         labels = {
+            "lift_colored_pages": "Éclaircir les pages à fond coloré (jaune, vert…)",
             "edge_trim_left": "Gauche (%)",
             "edge_trim_top": "Haut (%)",
             "edge_trim_right": "Droite (%)",
